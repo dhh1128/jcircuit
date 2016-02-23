@@ -130,7 +130,7 @@ public class CircuitBreaker {
      * of shared state is much more than the number of writes, and where writes are almost always
      * spaced out in time.
      */
-    private AtomicInteger stateSnapshot;
+    private AtomicInteger stateSnapshot = new AtomicInteger(CLOSED_STATE);
 
     /**
      * @return an opaque integer that encapsulates the current condition of the circuit breaker, including
@@ -176,6 +176,10 @@ public class CircuitBreaker {
      */
     public static final int STATE_MASK = 0x03;
 
+    // Rather than bit twiddling to update the state index, just add this much to it every time. This
+    // leaves the bottom two bits alone.
+    private static final int INDEX_INCREMENTER = 4;
+
     // This mask grabs the top 30 bits of the state snapshot.
     private static final int INDEX_MASK = ~STATE_MASK;
 
@@ -212,7 +216,7 @@ public class CircuitBreaker {
         if (!valid) {
             throw new IllegalArgumentException(String.format("Can't transition from state %d to %d.", oldState, newState));
         }
-        int newSnapshot = ((oldSnapshot & INDEX_MASK) + STATE_MASK) | newState;
+        int newSnapshot = ((oldSnapshot & INDEX_MASK) + INDEX_INCREMENTER) | newState;
         if (stateSnapshot.compareAndSet(oldSnapshot, newSnapshot)) {
             if (listener != null) {
                 listener.onCircuitBreakerTransition(oldState, newState);
@@ -284,6 +288,7 @@ public class CircuitBreaker {
 
                         // We failed to transition because the state changed since we fetched it. Restart
                         // the logic.
+                        System.out.println("retry in shouldTryNormalPath");
                         continue;
                     }
                     return false;

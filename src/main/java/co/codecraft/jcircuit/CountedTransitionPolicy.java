@@ -4,24 +4,29 @@ import java.util.concurrent.atomic.AtomicLong;
 
 /**
  * Provides a very simple circuit breaker policy, where all rules are expressed in terms of
- * counts -- if we get N errors in a row, open the circuit. After M alt pulses, try to reset.
+ * counts. Resets fail on any bad pulse.
  */
 public class CountedTransitionPolicy implements TransitionPolicy {
 
+    /** Open a closed circuit breaker if we see this many bad pulses in a row. */
     public final long openAfterNBads;
+    /** Try to reset an open circuit breaker after we see this many alt pulses in a row. */
     public final long tryResetAfterNAlts;
+    /** Fail a circuit breaker after attempting to reset, and failing, this many times in a row. */
     public final long failAfterNBadResets;
+    /** Deem a circuit breaker "repaired" and close it if, while resetting, we see good pulses this many times in a row. */
     public final long acceptResetAfterNGoods;
+
     public final AtomicLong consecutiveGoodsOrBads = new AtomicLong(0);
     public final AtomicLong consecutiveAlts = new AtomicLong(0);
     public final AtomicLong consecutiveBadResets = new AtomicLong(0);
 
     /**
      * Establish numeric thresholds that embody our policy.
-     * @param openAfterNBads  Must be positive.
-     * @param tryResetAfterNAlts  If < 1, automatic reset is disabled.
-     * @param failAfterNBadResets  If < 1, fail is disabled.
-     * @param acceptResetAfterNGoods  Must be positive.
+     * @param openAfterNBads  Must be positive. See {@link CountedTransitionPolicy#openAfterNBads the member variable}
+     * @param tryResetAfterNAlts  If < 1, automatic reset is disabled. See {@link CountedTransitionPolicy#tryResetAfterNAlts the member variable}
+     * @param failAfterNBadResets  If < 1, fail is disabled. See {@link CountedTransitionPolicy#failAfterNBadResets the member variable}
+     * @param acceptResetAfterNGoods  Must be positive. See {@link CountedTransitionPolicy#acceptResetAfterNGoods the member variable}
      */
     public CountedTransitionPolicy(long openAfterNBads, long tryResetAfterNAlts, long failAfterNBadResets,
                                    long acceptResetAfterNGoods) {
@@ -54,6 +59,7 @@ public class CountedTransitionPolicy implements TransitionPolicy {
             if (consecutiveGoodsOrBads.compareAndSet(old, n)) {
                 return n;
             }
+            System.out.println("retry in incrementConsecutiveGoodsOrBads");
         }
     }
 
@@ -76,6 +82,7 @@ public class CountedTransitionPolicy implements TransitionPolicy {
             // If we get here, then we tried to reset but someone else modified the state before we
             // could--and the new state wasn't CLOSED, because transition would have returned true
             // in that case. Re-examine our assumptions.
+            System.out.printf("retry in onGoodPulse; cg = %d\n", cg);
         }
     }
 
@@ -90,11 +97,11 @@ public class CountedTransitionPolicy implements TransitionPolicy {
                             return;
                         }
                     } else {
-                        
+
                     }
                     break;
                 case CircuitBreaker.CLOSED_STATE:
-                    if (cg >= openAfterNBads) {
+                    if (-cg >= openAfterNBads) {
                         if (cb.transition(stateSnapshot, CircuitBreaker.OPEN_STATE)) {
                             return;
                         }
@@ -103,6 +110,7 @@ public class CountedTransitionPolicy implements TransitionPolicy {
                 default:
                     return;
             }
+            System.out.printf("retry in onBadPulse; cg = %d\n", cg);
         }
     }
 
