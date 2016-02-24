@@ -18,106 +18,45 @@ public class CircuitBreakerTest {
     @Rule
     public ErrorCollector collector = new ErrorCollector();
 
+    public static final TransitionPolicy dudPolicy = new TransitionPolicy() {
+        @Override
+        public boolean shouldReset(CircuitBreaker cb) { return false; }
+        @Override
+        public void onGoodPulse(CircuitBreaker cb) { }
+        @Override
+        public void onBadPulse(CircuitBreaker cb, Throwable e) { }
+        @Override
+        public void onAltPulse(CircuitBreaker cb) { }
+        @Override
+        public boolean shouldDebug() { return true; }
+    };
+
+    public static class StateCaptureListener implements Listener {
+        List<Integer> states = new ArrayList<Integer>();
+        public void onCircuitBreakerTransition(int oldState, int newState) {
+            System.out.printf("transition %d --> %d\n", oldState, newState);
+            if (states.isEmpty()) {
+                states.add(oldState);
+            }
+            states.add(newState);
+        }
+    };
+
+    public static class LoggingListener implements Listener {
+        List<Integer> states = new ArrayList<Integer>();
+        public void onCircuitBreakerTransition(int oldState, int newState) {
+            System.out.printf("%d --> %d\n", oldState, newState);
+        }
+    };
+
     @Test
-    public void test_CountedTransitionPolicy_simple() {
-        CountedTransitionPolicy policy = new CountedTransitionPolicy(1, 1, 2, 1);
-        final List<Integer> states = new ArrayList<Integer>();
-        Listener listener = new Listener() {
-            public void onCircuitBreakerTransition(int oldState, int newState) {
-                //synchronized (states) {
-                System.out.printf("%d --> %d\n", oldState, newState);
-                states.add(newState);
-                //}
-            }
-        };
-        final CircuitBreaker cb = new CircuitBreaker(policy, listener);
-
-        assertTrue(cb.shouldTryNormalPath());
-
-        // go from closed to open
-        assertEquals(CLOSED_STATE, cb.getStateSnapshot() & CircuitBreaker.STATE_MASK);
-        cb.onGoodPulse(); // closed --> closed
-        assertEquals(CLOSED_STATE, cb.getStateSnapshot() & CircuitBreaker.STATE_MASK);
-        cb.onBadPulse(null); // closed --bad--> open
-        assertEquals(OPEN_STATE, cb.getStateSnapshot() & CircuitBreaker.STATE_MASK);
-        assertFalse(cb.shouldTryNormalPath());
-
-        // Healthy reset sequence
-        cb.onAltPulse(); // open --> about to reset
-        assertEquals(OPEN_STATE, cb.getStateSnapshot() & CircuitBreaker.STATE_MASK);
-        assertTrue(cb.shouldTryNormalPath());
-        assertEquals(RESETTING_STATE, cb.getStateSnapshot() & CircuitBreaker.STATE_MASK);
-        cb.onGoodPulse();
-        assertEquals(CLOSED_STATE, cb.getStateSnapshot() & CircuitBreaker.STATE_MASK);
-
-        // Now a failed reset sequence
-        cb.onBadPulse(null);
-        assertEquals(OPEN_STATE, cb.getStateSnapshot() & CircuitBreaker.STATE_MASK);
-        cb.onAltPulse();
-        assertTrue(cb.shouldTryNormalPath());
-        cb.onBadPulse(null); // first failed reset
-        assertFalse(cb.shouldTryNormalPath());
-        assertEquals(OPEN_STATE, cb.getStateSnapshot() & CircuitBreaker.STATE_MASK);
-        cb.onAltPulse();
-        assertTrue(cb.shouldTryNormalPath());
-        cb.onBadPulse(null);
-        assertEquals(FAILED_STATE, cb.getStateSnapshot() & CircuitBreaker.STATE_MASK);
-    }
-
-    //@Test
-    public void test_CountedTransitionPolicy_no_fails() throws InterruptedException {
-        CountedTransitionPolicy policy = new CountedTransitionPolicy(3, 2, 3, 4);
-        CircuitBreaker.Listener listener = new CircuitBreaker.Listener() {
-            List<Integer> states = new ArrayList<Integer>();
-            public void onCircuitBreakerTransition(int oldState, int newState) {
-                //synchronized (states) {
-                    System.out.printf("%d --> %d\n", oldState, newState);
-                    states.add(newState);
-                //}
-            }
-        };
-        final CircuitBreaker cb = new CircuitBreaker(policy, listener);
-        List<Thread> threads = new ArrayList<Thread>();
-        final AtomicInteger stateIndex = new AtomicInteger(0);
-
-        // Create some threads that will call the circuit breaker.
-        for (int i = 0; i < 5; ++i) {
-            Thread th = new Thread(new Runnable() {
-                public void run() {
-                    System.out.println("Started thread");
-                    for (int j = 0; j < 1001; ++j) {
-                        if (cb.shouldTryNormalPath()) {
-                            int n = stateIndex.getAndIncrement();
-                            int m = n % 100;
-                            if (m == 0 || m == 97) {
-                                System.out.printf("%d\n", n);
-                            }
-                            if (m < 97) {
-                                // 0 (reset attempt that succeeds), 1 ... 96
-                                cb.onGoodPulse();
-                            } else {
-                                // 97 --> open, 98, 99
-                                cb.onBadPulse(null);
-                            }
-                        } else {
-                            cb.onAltPulse();
-                        }
-                        try {
-                            Thread.sleep(0, 10000);
-                        } catch (InterruptedException e) {
-                            e.printStackTrace();
-                            return;
-                        }
-                    }
-                    System.out.println("Exited thread");
-                }
-            });
-            threads.add(th);
-            th.start();
-        }
-        for (Thread th: threads) {
-            th.join();
-        }
+    public void test_redundant_transition_returns_true() {
+        CircuitBreaker cb = new CircuitBreaker(dudPolicy, new LoggingListener());
+        int snapshot = cb.getStateSnapshot();
+        assertTrue(cb.transition(snapshot, 1));
+        // This redundant call should succeed, even if the snapshot is now outdated, because it is seeking the same
+        // goal as what we've already achieved.
+        assertTrue(cb.transition(snapshot, 1));
     }
 
 }

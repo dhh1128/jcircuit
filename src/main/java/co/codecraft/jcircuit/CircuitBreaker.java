@@ -190,39 +190,47 @@ public class CircuitBreaker {
      */
     boolean transition(int oldSnapshot, int newState) {
         int oldState = oldSnapshot & STATE_MASK;
-        if (oldState == newState) {
-            // No change. Caller should be happy and not retry.
-            return true;
-        }
         // Validate legal transition.
-        boolean valid;
-        switch (newState) {
-            case CLOSED_STATE:
-                valid = (oldState == RESETTING_STATE);
-                break;
-            case OPEN_STATE:
-                valid = (oldState == CLOSED_STATE || oldState == RESETTING_STATE);
-                break;
-            case RESETTING_STATE:
-                valid = (oldState == OPEN_STATE || oldState == FAILED_STATE);
-                break;
-            case FAILED_STATE:
-                valid = (oldState == RESETTING_STATE);
-                break;
-            default:
-                valid = false;
-                break;
-        }
-        if (!valid) {
-            throw new IllegalArgumentException(String.format("Can't transition from state %d to %d.", oldState, newState));
+        if (policy.shouldDebug()) {
+            boolean valid;
+            switch (newState) {
+                case CLOSED_STATE:
+                    valid = (oldState == RESETTING_STATE);
+                    break;
+                case OPEN_STATE:
+                    valid = (oldState == CLOSED_STATE || oldState == RESETTING_STATE);
+                    break;
+                case RESETTING_STATE:
+                    valid = (oldState == OPEN_STATE || oldState == FAILED_STATE);
+                    break;
+                case FAILED_STATE:
+                    valid = (oldState == RESETTING_STATE);
+                    break;
+                default:
+                    valid = false;
+                    break;
+            }
+            if (!valid) {
+                throw new IllegalArgumentException(String.format("Can't transition from state %d to %d.", oldState, newState));
+            }
         }
         int newSnapshot = ((oldSnapshot & INDEX_MASK) + INDEX_INCREMENTER) | newState;
+
+        // The common case: we were asked to update something valid, and nothing invalidated our starting assumptions,
+        // so we succeed.
         if (stateSnapshot.compareAndSet(oldSnapshot, newSnapshot)) {
             if (listener != null) {
                 listener.onCircuitBreakerTransition(oldState, newState);
             }
             return true;
+
+        // The second most common case: the request was redundant because more than one thread asked for the same
+        // transition.
+        } else if ((stateSnapshot.get() & STATE_MASK) == newState) {
+            return true;
         }
+
+        // Otherwise something changed during our analysis.
         return false;
     }
 
