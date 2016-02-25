@@ -4,7 +4,8 @@ import java.util.concurrent.atomic.AtomicLong;
 
 /**
  * Provides a very simple circuit breaker policy, where all rules are expressed in terms of
- * counts. Resets fail on any bad pulse.
+ * counts. Reset attempts can be configured to remain in limbo until a specified number of
+ * good pulses, but will fail on any bad pulse.
  */
 public class CountedTransitionPolicy implements TransitionPolicy {
 
@@ -34,11 +35,10 @@ public class CountedTransitionPolicy implements TransitionPolicy {
      * Establish numeric thresholds that embody our policy.
      * @param openAfterNBads  Must be positive. See {@link CountedTransitionPolicy#openAfterNBads the member variable}
      * @param tryResetAfterNAlts  If < 1, automatic reset is disabled. See {@link CountedTransitionPolicy#tryResetAfterNAlts the member variable}
-     * @param failAfterNBadResets  If < 1, fail is disabled. See {@link CountedTransitionPolicy#failAfterNBadResets the member variable}
      * @param acceptResetAfterNGoods  Must be positive. See {@link CountedTransitionPolicy#acceptResetAfterNGoods the member variable}
+     * @param failAfterNBadResets  If < 1, fail is disabled. See {@link CountedTransitionPolicy#failAfterNBadResets the member variable}
      */
-    public CountedTransitionPolicy(long openAfterNBads, long tryResetAfterNAlts, long failAfterNBadResets,
-                                   long acceptResetAfterNGoods) {
+    public CountedTransitionPolicy(long openAfterNBads, long tryResetAfterNAlts, long acceptResetAfterNGoods, long failAfterNBadResets) {
         if (openAfterNBads < 1) {
             throw new IllegalArgumentException(
                     "openAfterNBads must be positive; otherwise, circuit breaker is useless because it can never open.");
@@ -48,8 +48,8 @@ public class CountedTransitionPolicy implements TransitionPolicy {
         }
         this.openAfterNBads = openAfterNBads;
         this.tryResetAfterNAlts = tryResetAfterNAlts;
-        this.failAfterNBadResets = failAfterNBadResets;
         this.acceptResetAfterNGoods = acceptResetAfterNGoods;
+        this.failAfterNBadResets = failAfterNBadResets;
     }
 
     private static final long getPulseType(long masked) {
@@ -91,15 +91,28 @@ public class CountedTransitionPolicy implements TransitionPolicy {
             if (consecutivePulses.compareAndSet(old, (n << 2) | type)) {
                 return n;
             }
-            System.out.println("retry in incrementConsecutive");
+            //System.out.println("retry in incrementConsecutive (this is not a bug, but it should happen infrequently if the system is working");
         }
     }
 
     public void onGoodPulse(CircuitBreaker cb) {
+        int stateSnapshot = cb.getStateSnapshot();
+        int state = (stateSnapshot & CircuitBreaker.STATE_MASK);
+
+        /*
+        // Occasionally, signals will be processed out of order. This can cause us to get a "good pulse"
+        // signal when we're in states where that is nonsensical...
+        if (state == CircuitBreaker.OPEN_STATE) {
+            // Treat it as an alt pulse instead.
+            onAltPulse(cb);
+            return;
+        } else if (state == CircuitBreaker.FAILED_STATE) {
+            return;
+        }*/
+
         long cg = incrementConsecutive(GOOD_PULSE);
         // Loop until we have reacted to the possible need for a reset correctly.
         while (true) {
-            int stateSnapshot = cb.getStateSnapshot();
             // Most of the time, we're not considering a reset, so we can exit early.
             if ((stateSnapshot & CircuitBreaker.STATE_MASK) != CircuitBreaker.RESETTING_STATE) {
                 return;
@@ -115,15 +128,31 @@ public class CountedTransitionPolicy implements TransitionPolicy {
             // could--and the new state wasn't CLOSED, because transition would have returned true
             // in that case. Re-examine our assumptions.
             System.out.printf("retry in onGoodPulse; cg = %d\n", cg);
+            // Re-fetch state.
+            stateSnapshot = cb.getStateSnapshot();
         }
     }
 
     public void onBadPulse(CircuitBreaker cb, Throwable e) {
+        int stateSnapshot = cb.getStateSnapshot();
+        int state = (stateSnapshot & CircuitBreaker.STATE_MASK);
+
+        /*
+        // Occasionally, signals will be processed out of order. This can cause us to get a "bad pulse"
+        // signal when we're in states where that is nonsensical...
+        if (state == CircuitBreaker.OPEN_STATE) {
+            // treat it as an alt pulse instead
+            onAltPulse(cb);
+            return;
+        } else if (state == CircuitBreaker.FAILED_STATE) {
+            return;
+        }*/
+
+        // If we get here (the common case), then we need to react to the badness of this pulse.
         long cg = incrementConsecutive(BAD_PULSE);
         long n = -1;
         while (true) {
-            int stateSnapshot = cb.getStateSnapshot();
-            switch (stateSnapshot & CircuitBreaker.STATE_MASK) {
+            switch (state) {
                 // It is important to ponder why cb.transition() might fail below. In each case, it is because,
                 // by the time we attempt to transition, another thread has already transitioned us out of the
                 // state that we fetched when we called cb.getStateSnapshot(). Failures don't happen if a
@@ -162,6 +191,8 @@ public class CountedTransitionPolicy implements TransitionPolicy {
                     return;
             }
             System.out.printf("retry in onBadPulse; cg = %d\n", cg);
+            // Re-fetch state.
+            stateSnapshot = cb.getStateSnapshot();
         }
     }
 
