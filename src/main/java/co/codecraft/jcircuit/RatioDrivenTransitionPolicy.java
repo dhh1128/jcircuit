@@ -3,20 +3,49 @@ package co.codecraft.jcircuit;
 import java.util.concurrent.atomic.AtomicLong;
 
 /**
- * Provides a very simple circuit breaker policy, where all rules are expressed in terms of
- * counts. Reset attempts can be configured to remain in limbo until a specified number of
- * good pulses, but will fail on any bad pulse.
+ * Provides a simple circuit breaker policy, where all rules are expressed in terms of
+ * ratios of good and bad pulses.
+ *
+ * In terms of efficiency, this policy is suitable for highly concurrent environments and
+ * very fast pulses (hundreds or thousands of pulses per second). Its overhead is low, and
+ * it is robust and well tested. However, it is important to match the transition thresholds
+ * in the constructor to the concurrency you expect. An env where dozens or hundreds of
+ * threads are sending concurrent pulses is likely to create very "fuzzy" transitions, where
+ * good and bad pulses intermingle, even if the condition that determines goodness/badness
+ * is crisp. This is because concurrent pulses are likely to be processed in an order that's
+ * moderately different from the order in which they actually occur. In practical terms,
+ * that means you shouldn't use low thresholds (e.g., open the circuit after 5 bad pulses in
+ * a row, and sucessfully reset after 5 good ones) where concurrency and pulse rate are
+ * high.
  */
-public class CountedTransitionPolicy implements TransitionPolicy {
+public class RatioDrivenTransitionPolicy implements TransitionPolicy {
 
-    /** Open a closed circuit breaker if we see this many bad pulses in a row. */
-    public final long openAfterNBads;
-    /** Try to reset an open circuit breaker after we see this many alt pulses in a row. */
-    public final long tryResetAfterNAlts;
-    /** Fail a circuit breaker after attempting to reset, and failing, this many times in a row. */
-    public final long failAfterNBadResets;
-    /** Deem a circuit breaker "repaired" and close it if, while resetting, we see good pulses this many times in a row. */
-    public final long acceptResetAfterNGoods;
+    /**
+     * Open a closed circuit breaker if we see a ratio of good:bad that is <= this value.
+     */
+    public final float openAtGoodToBadRatio;
+
+    /**
+     * Deem an open circuit breaker "repaired" and close it if, while resetting, we see a ratio of
+     * good:bad pulses >= this value.
+     */
+    public final float closeAtGoodToBadRatio;
+
+    /**
+     * Fail a circuit breaker after attempting to reset (and failing), this many times in a row. If
+     * this value is <= 0, the circuit breaker never fails -- it just flips between closed and open.
+     */
+    public final int failAfterNBadResets;
+
+    /**
+     * Analyze ratios in slices (sets of pulses) of this size.
+     */
+    public final int sliceSize;
+
+    /**
+     * How many slices do we have to wait before being eligible for a reset of the circuit breaker?
+     */
+    public final int eligibleForResetAfterNSlices;
 
     /**
      *  Holds a counter, with the lower 2 bits reserved to track which type of pulse we are counting (see
@@ -33,12 +62,12 @@ public class CountedTransitionPolicy implements TransitionPolicy {
 
     /**
      * Establish numeric thresholds that embody our policy.
-     * @param openAfterNBads  Must be positive. See {@link CountedTransitionPolicy#openAfterNBads the member variable}
-     * @param tryResetAfterNAlts  If < 1, automatic reset is disabled. See {@link CountedTransitionPolicy#tryResetAfterNAlts the member variable}
-     * @param acceptResetAfterNGoods  Must be positive. See {@link CountedTransitionPolicy#acceptResetAfterNGoods the member variable}
-     * @param failAfterNBadResets  If < 1, fail is disabled. See {@link CountedTransitionPolicy#failAfterNBadResets the member variable}
+     * @param openAfterNBads  Must be positive. See {@link RatioDrivenTransitionPolicy#openAfterNBads the member variable}
+     * @param tryResetAfterNAlts  If < 1, automatic reset is disabled. See {@link RatioDrivenTransitionPolicy#tryResetAfterNAlts the member variable}
+     * @param acceptResetAfterNGoods  Must be positive. See {@link RatioDrivenTransitionPolicy#acceptResetAfterNGoods the member variable}
+     * @param failAfterNBadResets  If < 1, fail is disabled. See {@link RatioDrivenTransitionPolicy#failAfterNBadResets the member variable}
      */
-    public CountedTransitionPolicy(long openAfterNBads, long tryResetAfterNAlts, long acceptResetAfterNGoods, long failAfterNBadResets) {
+    public RatioDrivenTransitionPolicy(long openAfterNBads, long tryResetAfterNAlts, long acceptResetAfterNGoods, long failAfterNBadResets) {
         if (openAfterNBads < 1) {
             throw new IllegalArgumentException(
                     "openAfterNBads must be positive; otherwise, circuit breaker is useless because it can never open.");

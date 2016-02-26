@@ -13,11 +13,11 @@ import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 
 
-public class CountedTransitionPolicyTest {
+public class RatioDrivenTransitionPolicyTest {
 
     @Test
     public void test_CountedTransitionPolicy_simple() {
-        CountedTransitionPolicy policy = new CountedTransitionPolicy(1, 1, 1, 2);
+        RatioDrivenTransitionPolicy policy = new RatioDrivenTransitionPolicy(1, 1, 1, 2);
         final List<Integer> states = new ArrayList<Integer>();
         final CircuitBreaker cb = new CircuitBreaker(policy, new StateCaptureListener());
 
@@ -59,7 +59,7 @@ public class CountedTransitionPolicyTest {
         // tryResetAfterNAlts = 2
         // acceptResetAfterNGoods = 4
         // failAfterNBadResets = 3
-        CountedTransitionPolicy policy = new CountedTransitionPolicy(3, 2, 4, 3);
+        RatioDrivenTransitionPolicy policy = new RatioDrivenTransitionPolicy(3, 2, 4, 3);
 
         StateCaptureListener listener = new StateCaptureListener();
         final CircuitBreaker cb = new CircuitBreaker(policy, listener);
