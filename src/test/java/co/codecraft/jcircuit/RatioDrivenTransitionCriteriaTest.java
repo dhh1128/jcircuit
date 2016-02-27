@@ -13,56 +13,27 @@ import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 
 
-public class RatioDrivenTransitionPolicyTest {
+public class RatioDrivenTransitionCriteriaTest {
 
     @Test
-    public void test_CountedTransitionPolicy_simple() {
-        RatioDrivenTransitionPolicy policy = new RatioDrivenTransitionPolicy(1, 1, 1, 2);
-        final List<Integer> states = new ArrayList<Integer>();
-        final CircuitBreaker cb = new CircuitBreaker(policy, new StateCaptureListener());
-
-        assertTrue(cb.shouldTryNormalPath());
-
-        // go from closed to open
-        assertEquals(CLOSED_STATE, cb.getStateSnapshot() & CircuitBreaker.STATE_MASK);
-        cb.onGoodPulse(); // closed --> closed
-        assertEquals(CLOSED_STATE, cb.getStateSnapshot() & CircuitBreaker.STATE_MASK);
-        cb.onBadPulse(null); // closed --bad--> open
-        assertEquals(OPEN_STATE, cb.getStateSnapshot() & CircuitBreaker.STATE_MASK);
-        assertFalse(cb.shouldTryNormalPath());
-
-        // Healthy reset sequence
-        cb.onAltPulse(); // open --> about to reset
-        assertEquals(OPEN_STATE, cb.getStateSnapshot() & CircuitBreaker.STATE_MASK);
-        assertTrue(cb.shouldTryNormalPath());
-        assertEquals(RESETTING_STATE, cb.getStateSnapshot() & CircuitBreaker.STATE_MASK);
-        cb.onGoodPulse();
-        assertEquals(CLOSED_STATE, cb.getStateSnapshot() & CircuitBreaker.STATE_MASK);
-
-        // Now a failed reset sequence
-        cb.onBadPulse(null);
-        assertEquals(OPEN_STATE, cb.getStateSnapshot() & CircuitBreaker.STATE_MASK);
-        cb.onAltPulse();
-        assertTrue(cb.shouldTryNormalPath());
-        cb.onBadPulse(null); // first failed reset
-        assertFalse(cb.shouldTryNormalPath());
-        assertEquals(OPEN_STATE, cb.getStateSnapshot() & CircuitBreaker.STATE_MASK);
-        cb.onAltPulse();
-        assertTrue(cb.shouldTryNormalPath());
-        cb.onBadPulse(null);
-        assertEquals(FAILED_STATE, cb.getStateSnapshot() & CircuitBreaker.STATE_MASK);
-    }
-
-    @Test
-    public void test_CountedTransitionPolicy_many_opens_no_fails() throws InterruptedException {
+    public void test_many_opens_no_fails() throws InterruptedException {
+        assertFalse(true);
+        /*
+        create a transitionPolicy: require ratio > 0.8 to reset, <0.5 to fail
+                re-evaluate every .1 secs, and for reset after .2 secs
+        create 5 threads to generate pulses
+        create 1 thread that toggles pulses so they are good for .25 secs, bad for .5 secs, and good for .25 secs
+        assert that we have flipped to open at least once but not more than twice
+        assert that we have attempted to reset more than once
+        assert that we have now successfully closed again
         // openAfterNBads = 3
         // tryResetAfterNAlts = 2
         // acceptResetAfterNGoods = 4
         // failAfterNBadResets = 3
-        RatioDrivenTransitionPolicy policy = new RatioDrivenTransitionPolicy(3, 2, 4, 3);
+        TimedRatioPolicy transitionPolicy = new TimedRatioPolicy(3, 2, 4, 3);
 
         StateCaptureListener listener = new StateCaptureListener();
-        final CircuitBreaker cb = new CircuitBreaker(policy, listener);
+        final CircuitBreaker cb = new CircuitBreaker(transitionPolicy, listener);
         List<Thread> threads = new ArrayList<Thread>();
 
         final AtomicInteger stateIndex = new AtomicInteger(0);
@@ -121,5 +92,6 @@ public class RatioDrivenTransitionPolicyTest {
         List<Integer> states = listener.states;
         int last = states.size() - 1;
         assertEquals(CircuitBreaker.CLOSED_STATE, (int)states.get(last));
+        */
     }
 }
