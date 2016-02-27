@@ -1,7 +1,9 @@
 package co.codecraft.jcircuit;
 
-import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+
+import static co.codecraft.jcircuit.Circuit.*;
 
 /**
  * Encapsulates the circuit breaker design pattern described by Michael Nygard in Release It! See
@@ -14,9 +16,10 @@ import java.util.concurrent.Executors;
  *
  * Circuit breakers protect a fallible unit of work (a chunk of code) that will be called repeatedly, and
  * This unit of work is called a {@link Circuit "circuit"}.
- * This work is attempted whenever the circuit breaker is "closed" (see {@link #CLOSED_STATE}. In order
+ *
+ * This work is attempted whenever the circuit breaker is "closed" (see {@link Circuit#CLOSED}. In order
  * for the circuit breaker to be useful, there must be an alternate code path that is safer or less taxing,
- * and calling code must take this alternate path when the circuit is "open" (see {@link #OPEN_STATE}. The
+ * and calling code must take this alternate path when the circuit is "open" (see {@link Circuit#OPEN}. The
  * obvious alternate/open code path for a circuit breaker is to do nothing, but more elaborate alternate
  * logic is conceivable.
  *
@@ -24,8 +27,8 @@ import java.util.concurrent.Executors;
  * codepath (per circuit breaker state), is called a "pulse."
  *
  * A circuit breaker may be "reset", meaning that it has been open, and we now want to close it again to
- * resume normal operations. Resetting (see {@link #RESETTING_STATE} can trigger automatically (e.g., after
- * a time delay or a number of pulses). If a circuit breaker has "failed" (see {@link #FAILED_STATE}, resets
+ * resume normal operations. Resetting (see {@link Circuit#RESETTING} can trigger automatically (e.g., after
+ * a time delay or a number of pulses). If a circuit breaker has "failed" (see {@link Circuit#FAILED}, resets
  * are only manual. Whether automatic or manual, resets do not necessarily succeed.
  *
  *
@@ -89,17 +92,20 @@ import java.util.concurrent.Executors;
  */
 public class CircuitBreaker {
 
+    public final Circuit circuit;
+
     /**
      * Make transition decisions for me.
      */
     public final TransitionPolicy transitionPolicy;
 
     /**
-     * Provides an expandable pool of threads that can be used to monitor circuit breakers. Not all circuit
-     * breakers need background threads, but some do--and if they do, this is a convenient place to get
-     * them.
+     * Provides a thread that can be used to monitor circuit breakers that do very light work
+     * on a schedule. This can be used by policies that need to check something periodically.
+     * It is important that tasks run by this service complete quickly (microseconds), to avoid
+     * bogging down notifications needed by other parts of the system.
      */
-    public static final ExecutorService threadPool = Executors.newCachedThreadPool();
+    public static final ScheduledExecutorService scheduledExecutorService = Executors.newSingleThreadScheduledExecutor();
 
     /**
      * Receive notifications when the state of the circuit breaker changes.
@@ -109,15 +115,16 @@ public class CircuitBreaker {
     /**
      * Create a new CircuitBreaker that will transition per the specified transitionPolicy.
      *
-     * @param transitionPolicy  May not be null.
+     * @param policy  May not be null.
      * @param listener  May be null.
      */
-    public CircuitBreaker(TransitionPolicy transitionPolicy, Listener listener) {
+    public CircuitBreaker(TransitionPolicy policy, Circuit.Listener listener) {
         if (policy == null) {
             throw new IllegalArgumentException("Policy cannot be null; circuit breaker would not know how to transition.");
         }
         this.transitionPolicy = policy;
-        //this.listener = listener;
+        this.circuit = new Circuit(listener);
+        policy.bindTo(this);
     }
 
     /**
@@ -125,7 +132,7 @@ public class CircuitBreaker {
      * may be used by the circuit breaker's {@link #transitionPolicy} to update state.
      */
     public void onGoodPulse() {
-        transitionPolicy.onGoodPulse(this);
+        transitionPolicy.onGoodPulse();
     }
 
     /**
@@ -137,7 +144,7 @@ public class CircuitBreaker {
      *           between a temporary and a permanent error).
      */
     public void onBadPulse(Throwable e) {
-        transitionPolicy.onBadPulse(this, e);
+        transitionPolicy.onBadPulse(e);
     }
 
     /**
@@ -145,7 +152,7 @@ public class CircuitBreaker {
      * was open. This information may be used by the circuit breaker's {@link #transitionPolicy} to update state.
      */
     public void onAltPulse() {
-        transitionPolicy.onAltPulse(this);
+        transitionPolicy.onAltPulse();
     }
 
     /**
@@ -153,46 +160,13 @@ public class CircuitBreaker {
      * alternate/fallback work.
      */
     public boolean shouldTryNormalPath() {
-        return false;
-        /*
-        // We use an infinite loop here to support retry in the extremely rare case where the state
-        // changes in the middle of our analysis.
-        while (true) {
-
-            // Capture the state when we began our analysis.
-            int snapshot = stateSnapshot.get();
-            switch (snapshot & STATE_MASK) {
-
-                // If there's an obvious answer, return it. Make the common cases fast.
-                case CLOSED_STATE:
-                case RESETTING_STATE:
-                    return true;
-                case FAILED_STATE:
-                    return false;
-
-                // This is the complex case. If we're currently open, we need to test for automatic resetting.
-                case OPEN_STATE:
-                    // Policy needs to implement this method efficiently!
-                    if (transitionPolicy.shouldReset(this)) {
-
-                        // Attempt to transition into resetting. This will fail if some other thread beat us to
-                        // it, or if conditions changed such that we should no longer reset by the time we got
-                        // to this line.
-                        if (transition(snapshot, RESETTING_STATE)) {
-                            return true;
-                        }
-
-                        // We failed to transition because the state changed since we fetched it. Restart
-                        // the logic.
-                        System.out.println("retry in shouldTryNormalPath");
-                        continue;
-                    }
-                    return false;
-
-                default:
-                    throw new AssertionError(String.format("snapshot is not in a valid state (%d)", snapshot));
-            }
+        int snapshot = circuit.getStateSnapshot();
+        switch (snapshot & STATE_MASK) {
+            case CLOSED:
+            case RESETTING:
+                return true;
+            default:
+                return false;
         }
-        */
     }
 }

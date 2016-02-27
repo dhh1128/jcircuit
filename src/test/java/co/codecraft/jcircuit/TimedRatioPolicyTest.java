@@ -13,7 +13,7 @@ import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 
 
-public class RatioDrivenTransitionCriteriaTest {
+public class TimedRatioPolicyTest {
 
     @Test
     public void test_many_opens_no_fails() throws InterruptedException {
