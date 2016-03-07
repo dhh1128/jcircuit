@@ -66,10 +66,10 @@ public class TimedRatioPolicy extends TransitionPolicy {
      * @param closeAtGoodRatio  See {@link #closeAtGoodRatio the member variable}.
      * @param failAfterNBadResets  If < 1, fail is disabled. See {@link #failAfterNBadResets the member variable}.
      */
-    public TimedRatioPolicy(CircuitBreaker cb, float openAtGoodRatio, float closeAtGoodRatio,
-                            int failAfterNBadResets, int sliceAfterNMillis, int resetAfterNMillis) {
-        this.openAtGoodRatio = openAtGoodRatio;
-        this.closeAtGoodRatio = closeAtGoodRatio;
+    public TimedRatioPolicy(double openAtGoodRatio, double closeAtGoodRatio, int failAfterNBadResets,
+                            int sliceAfterNMillis, int resetAfterNMillis) {
+        this.openAtGoodRatio = (float)openAtGoodRatio;
+        this.closeAtGoodRatio = (float)closeAtGoodRatio;
         this.failAfterNBadResets = failAfterNBadResets;
         this.sliceAfterNMillis = sliceAfterNMillis;
         this.resetAfterNMillis = resetAfterNMillis;
@@ -78,6 +78,7 @@ public class TimedRatioPolicy extends TransitionPolicy {
     }
 
     private void finalizeSlice() {
+        System.out.println("slicing");
         long n = pulseCount.getAndSet(0);
         long good = n & GOOD_MASK;
         long bad = (n & BAD_MASK) >> 32;

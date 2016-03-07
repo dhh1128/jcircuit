@@ -4,6 +4,7 @@ import org.junit.Test;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static co.codecraft.jcircuit.CircuitBreakerTest.*;
@@ -16,8 +17,61 @@ import static org.junit.Assert.assertTrue;
 public class TimedRatioPolicyTest {
 
     @Test
-    public void test_many_opens_no_fails() throws InterruptedException {
-        assertFalse(true);
+    public void test_multiple_opens_no_fails() throws InterruptedException {
+        CapturingListener listener = new CapturingListener();
+        listener.debug = true;
+        TimedRatioPolicy policy = new TimedRatioPolicy(0.5, 0.75, 0, 100, 200);
+        final CircuitBreaker cb = new CircuitBreaker(policy, listener);
+        final AtomicBoolean shouldSimulateHealth = new AtomicBoolean(true);
+        final AtomicBoolean shouldContinue = new AtomicBoolean(true);
+        List<Thread> threads = new ArrayList<Thread>();
+        for (int i = 0; i < 5; ++i) {
+            Thread th = new Thread(new Runnable() {
+                @Override
+                public void run() {
+                    while (shouldContinue.get()) {
+                        if (cb.shouldTryNormalPath()) {
+                            if (shouldSimulateHealth.get()) {
+                                System.out.println("good");
+                                cb.onGoodPulse();
+                            } else {
+                                System.out.println("bad");
+                                cb.onBadPulse(null);
+                            }
+                        } else {
+                            System.out.println("alt");
+                            cb.onAltPulse();
+                        }
+                        try {
+                            Thread.sleep(1);
+                        } catch (InterruptedException e) {
+                            return;
+                        }
+                    }
+                }
+            });
+            threads.add(th);
+            th.start();
+        }
+        Thread.sleep(250);
+        shouldSimulateHealth.set(false);
+        Thread.sleep(500);
+        shouldSimulateHealth.set(true);
+        Thread.sleep(250);
+        shouldContinue.set(false);
+        for (Thread th: threads) {
+            th.join();
+        }
+        int counts[] = new int[4];
+        List<Integer> transitions = listener.transitions;
+        for (Integer n: transitions) {
+            counts[n]+= 1;
+        }
+        assertEquals(1, counts[Circuit.OPEN]);
+        assertEquals(2, counts[Circuit.CLOSED]);
+        assertTrue(counts[Circuit.RESETTING] > 1);
+        assertEquals(0, counts[Circuit.FAILED]);
+        assertEquals(Circuit.CLOSED, (int)transitions.get(transitions.size() - 1));
         /*
         create a transitionPolicy: require ratio > 0.8 to reset, <0.5 to fail
                 re-evaluate every .1 secs, and for reset after .2 secs
