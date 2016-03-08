@@ -18,6 +18,9 @@ public class TimedRatioPolicyTest {
         CapturingListener listener = new CapturingListener();
         //listener.debug = true;
         TimedRatioPolicy policy = TimedRatioPolicy.builder()
+                .setEvalEveryNMillis(50)
+                .setResetAfterNMillis(49)
+                .setFailAfterNBadResets(3)
                 .build();
         CircuitBreaker cb = new CircuitBreaker(policy, listener);
 
@@ -26,14 +29,14 @@ public class TimedRatioPolicyTest {
         circuit breaker tries to reset several times and eventually fails. Then simulate good health
         again. We should get stuck in the FAILED state.
         */
-        toggleSimulatedHealth(cb, 90, 420, 300);
+        toggleSimulatedHealth(cb, 90, 780, 300);
 
         assertTrue(listener.transitions.size() < 20);
         assertEquals(Circuit.FAILED, listener.getFinalState());
         int counts[] = listener.getTransitionCounts();
-        assertTrue(counts[Circuit.OPEN] >= 3);
+        assertTrue(counts[Circuit.OPEN] >= 2);
         assertEquals(1, counts[Circuit.CLOSED]);
-        assertTrue(counts[Circuit.RESETTING] >= 3);
+        assertTrue(counts[Circuit.RESETTING] >= 2);
         assertEquals(1, counts[Circuit.FAILED]);
     }
 
