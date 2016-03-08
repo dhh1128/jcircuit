@@ -99,7 +99,7 @@ public class CircuitTest {
                 return;
             }
         }
-        System.out.printf("validCount = %d\n", validCount.get());
+        //System.out.printf("validCount = %d\n", validCount.get());
         assertTrue(validCount.get() > 1500);
         assertTrue(validCount.get() < 5000);
         for (int i = 0, j = 1; j < cl.transitions.size(); ++i, ++j) {

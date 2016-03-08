@@ -108,12 +108,7 @@ public class CircuitBreaker {
     public static final ScheduledExecutorService scheduledExecutorService = Executors.newScheduledThreadPool(1);
 
     /**
-     * Receive notifications when the state of the circuit breaker changes.
-     */
-    //public final Listener listener;
-
-    /**
-     * Create a new CircuitBreaker that will transition per the specified transitionPolicy.
+     * Create a new CircuitBreaker that will transition per the specified policy.
      *
      * @param policy  May not be null.
      * @param listener  May be null.
