@@ -5,10 +5,7 @@ import org.junit.Test;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.concurrent.atomic.AtomicInteger;
 
-import static co.codecraft.jcircuit.CircuitBreakerTest.*;
-import static co.codecraft.jcircuit.CircuitBreaker.*;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
@@ -17,13 +14,93 @@ import static org.junit.Assert.assertTrue;
 public class TimedRatioPolicyTest {
 
     @Test
-    public void test_multiple_opens_no_fails() throws InterruptedException {
+    public void test_permanent_failure() throws InterruptedException {
         CapturingListener listener = new CapturingListener();
-        listener.debug = true;
-        TimedRatioPolicy policy = new TimedRatioPolicy(0.5, 0.75, 0, 100, 200);
-        final CircuitBreaker cb = new CircuitBreaker(policy, listener);
-        final AtomicBoolean shouldSimulateHealth = new AtomicBoolean(true);
-        final AtomicBoolean shouldContinue = new AtomicBoolean(true);
+        //listener.debug = true;
+        TimedRatioPolicy policy = TimedRatioPolicy.builder()
+                .build();
+        CircuitBreaker cb = new CircuitBreaker(policy, listener);
+
+        /*
+        For a brief time, report good health. Then report bad health for a long time, such that the
+        circuit breaker tries to reset several times and eventually fails. Then simulate good health
+        again. We should get stuck in the FAILED state.
+        */
+        toggleSimulatedHealth(cb, 90, 420, 300);
+
+        assertTrue(listener.transitions.size() < 20);
+        assertEquals(Circuit.FAILED, listener.getFinalState());
+        int counts[] = listener.getTransitionCounts();
+        assertTrue(counts[Circuit.OPEN] >= 3);
+        assertEquals(1, counts[Circuit.CLOSED]);
+        assertTrue(counts[Circuit.RESETTING] >= 3);
+        assertEquals(1, counts[Circuit.FAILED]);
+    }
+
+    @Test
+    public void test_complete_cycle() throws InterruptedException {
+        CapturingListener listener = new CapturingListener();
+        //listener.debug = true;
+
+        TimedRatioPolicy policy = TimedRatioPolicy.builder()
+            .setResetAfterNMillis(199)
+            .build();
+
+        CircuitBreaker cb = new CircuitBreaker(policy, listener);
+
+        /*
+        For a brief time, report good health. Then report bad health for a while. Then report
+        good health again. If our policy is working correctly, we should flip the circuit breaker
+        into an OPEN state partway through, then eventually close again. In the middle of the test,
+        we should attempt to reset twice, failing once and succeeding on our second attempt. On
+        machines that have plenty of idle CPU, and where we don't experience any rounding errors
+        in the periodic slice timing, the timing ought to look like this:
+            start (+0.0 sec)
+            0.1 no change (stay closed)
+            0.2 closed --> open
+            0.4 open --> resetting
+            0.5 resetting --> open
+            0.7 open --> resetting
+            0.8 resetting --> closed
+        We add in some extra time just in case we run in a busy env, where the transitions are less crisp.
+        */
+        toggleSimulatedHealth(cb, 110, 550, 540);
+
+        assertTrue(listener.transitions.size() < 20);
+        int counts[] = listener.getTransitionCounts();
+        assertTrue(counts[Circuit.OPEN] >= 1);
+        assertEquals(2, counts[Circuit.CLOSED]);
+        assertTrue(counts[Circuit.RESETTING] >= 1);
+        assertEquals(0, counts[Circuit.FAILED]);
+        assertEquals(Circuit.CLOSED, listener.getFinalState());
+    }
+
+    private void toggleSimulatedHealth(CircuitBreaker cb, Integer... periods) throws InterruptedException {
+        List<Thread> threads = startWorkerThreads(cb);
+        boolean b = true;
+        for (Integer n: periods) {
+            Thread.sleep(n);
+            b = !b;
+            shouldSimulateHealth.set(b);
+        }
+        shouldContinue.set(false);
+        // Wait for all worker threads to stop.
+        for (Thread th: threads) {
+            th.join();
+        }
+    }
+
+
+    private final AtomicBoolean shouldSimulateHealth = new AtomicBoolean(true);
+    private final AtomicBoolean shouldContinue = new AtomicBoolean(true);
+
+    /**
+     * Create some worker threads that will send pulses through the circuit breaker and report
+     * health according to what shouldSimulateHealth says.
+     */
+    private List<Thread> startWorkerThreads(final CircuitBreaker cb) {
+        shouldSimulateHealth.set(true);
+        shouldContinue.set(true);
         List<Thread> threads = new ArrayList<Thread>();
         for (int i = 0; i < 5; ++i) {
             Thread th = new Thread(new Runnable() {
@@ -32,14 +109,11 @@ public class TimedRatioPolicyTest {
                     while (shouldContinue.get()) {
                         if (cb.shouldTryNormalPath()) {
                             if (shouldSimulateHealth.get()) {
-                                System.out.println("good");
                                 cb.onGoodPulse();
                             } else {
-                                System.out.println("bad");
                                 cb.onBadPulse(null);
                             }
                         } else {
-                            System.out.println("alt");
                             cb.onAltPulse();
                         }
                         try {
@@ -53,99 +127,7 @@ public class TimedRatioPolicyTest {
             threads.add(th);
             th.start();
         }
-        Thread.sleep(250);
-        shouldSimulateHealth.set(false);
-        Thread.sleep(500);
-        shouldSimulateHealth.set(true);
-        Thread.sleep(250);
-        shouldContinue.set(false);
-        for (Thread th: threads) {
-            th.join();
-        }
-        int counts[] = new int[4];
-        List<Integer> transitions = listener.transitions;
-        for (Integer n: transitions) {
-            counts[n]+= 1;
-        }
-        assertEquals(1, counts[Circuit.OPEN]);
-        assertEquals(2, counts[Circuit.CLOSED]);
-        assertTrue(counts[Circuit.RESETTING] > 1);
-        assertEquals(0, counts[Circuit.FAILED]);
-        assertEquals(Circuit.CLOSED, (int)transitions.get(transitions.size() - 1));
-        /*
-        create a transitionPolicy: require ratio > 0.8 to reset, <0.5 to fail
-                re-evaluate every .1 secs, and for reset after .2 secs
-        create 5 threads to generate pulses
-        create 1 thread that toggles pulses so they are good for .25 secs, bad for .5 secs, and good for .25 secs
-        assert that we have flipped to open at least once but not more than twice
-        assert that we have attempted to reset more than once
-        assert that we have now successfully closed again
-        // openAfterNBads = 3
-        // tryResetAfterNAlts = 2
-        // acceptResetAfterNGoods = 4
-        // failAfterNBadResets = 3
-        TimedRatioPolicy transitionPolicy = new TimedRatioPolicy(3, 2, 4, 3);
-
-        StateCaptureListener listener = new StateCaptureListener();
-        final CircuitBreaker cb = new CircuitBreaker(transitionPolicy, listener);
-        List<Thread> threads = new ArrayList<Thread>();
-
-        final AtomicInteger stateIndex = new AtomicInteger(0);
-
-        // Create some threads that will call the circuit breaker. We will send about a thousand pulses
-        // through the circuit breaker. Most will be good; a few will be bad or alt.
-        for (int i = 0; i < 5; ++i) {
-            Thread th = new Thread(new Runnable() {
-                public void run() {
-                    for (int j = 0; j < 1000; ++j) {
-                        if (cb.shouldTryNormalPath()) {
-                            int n = stateIndex.getAndIncrement();
-                            if (n % 50 == 0) {
-                                System.out.printf("%d\n", n);
-                            }
-                            int m = n % 100;
-
-                            // For the first 91 iterations out of every 100 (m=0 through m=90), we want to
-                            // keep the circuit breaker closed. During the m=50 to m=70 range, even pulses
-                            // will be bad (which shouldn't be enough to trip the circuit breaker); in the
-                            // rest of the range, just report good pulses.
-                            if (m <= 90 || m > 97) {
-
-                                if ((m >= 50 && m <= 70) && (m % 2 == 0)) {
-                                    cb.onBadPulse(null);
-                                } else {
-                                    cb.onGoodPulse();
-                                }
-
-                            // For the next 5 iterations (m=91 through m=95), report a bad pulse. When m == 93, this
-                            // should trip the breaker; we go a little past that just in case something gets
-                            // reported out of order.
-                            } else if (m <= 95) {
-                                cb.onBadPulse(null);
-                            }
-                        } else {
-                            // This should happen for m=96 through m=99. After m=97 (the second alt), we should
-                            // become eligible for a reset attempt, and it should succeed.
-                            cb.onAltPulse();
-                        }
-                        try {
-                            Thread.sleep(0, 10000);
-                        } catch (InterruptedException e) {
-                            e.printStackTrace();
-                            return;
-                        }
-                    }
-                }
-            });
-            threads.add(th);
-            th.start();
-        }
-        for (Thread th: threads) {
-            th.join();
-        }
-        List<Integer> states = listener.states;
-        int last = states.size() - 1;
-        assertEquals(CircuitBreaker.CLOSED_STATE, (int)states.get(last));
-        */
+        return threads;
     }
+
 }

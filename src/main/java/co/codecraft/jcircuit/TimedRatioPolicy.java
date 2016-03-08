@@ -2,6 +2,7 @@ package co.codecraft.jcircuit;
 
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 
 import static co.codecraft.jcircuit.Circuit.*;
@@ -26,34 +27,56 @@ public class TimedRatioPolicy extends TransitionPolicy {
 
     /**
      * Open a closed circuit breaker if we see a ratio of good:all that is <= this value.
+     * A value between 0.0 and 1.0, inclusive.
      */
     public final float openAtGoodRatio;
 
     /**
      * Deem an open circuit breaker "repaired" and close it if, while resetting, we see a ratio of
-     * good:all pulses >= this value.
+     * good:all pulses >= this value. A value between 0.0 and 1.0, inclusive. Generally, this value
+     * will be greater than {@link #openAtGoodRatio}, so a reset doesn't succeed unless the circuit
+     * is likely to stay closed.
      */
     public final float closeAtGoodRatio;
 
     /**
      * Fail a circuit breaker after attempting to reset (and failing), this many times in a row. If
-     * this value is <= 0, the circuit breaker never fails -- it just flips between closed and open.
+     * this value is <= 0, the circuit breaker never fails -- it just transitions from {@link Circuit#RESETTING}
+     * to either {@link Circuit#CLOSED} or {@link Circuit#OPEN}.
      */
     public final int failAfterNBadResets;
 
     /**
-     * Determines when we collate data into a "slice" against which ratios can be evaluated.
+     * Determines how often we cut data into a "slice" against which ratios can be evaluated, and thus
+     * the max speed with which transitions in the circuit can occur.
+     *
+     * Pick a value that allows sufficient data to accumulate that we can reason with confidence about
+     * the state of the system. If your circuit will pulse 10 times per second, you probably
+     * don't want to slice every 50 milliseconds, because you'll have empty slices half the time; a
+     * better value in such a scenario might be 1000 or more, since this would give the average
+     * slice 10 pulses to reason about. ({@link #minSliceCount} guarantees useful ratios even if no
+     * samples accumulate in a given slice interval, so configuring this value correctly is mostly
+     * a matter of efficiency.)
      */
-    public final int sliceAfterNMillis;
+    public final int evalEveryNMillis;
 
     /**
-     * Determines when we are ready to reset, after having an open circuit for a while.
+     * Determines when we are ready to attempt a reset, after having an open circuit for a while. This should
+     * be a value >= @{link #evalEveryNMillis}, since resets are only attempted on eval boundaries.
      */
     public final int resetAfterNMillis;
 
+    /**
+     * The minimum number of pulses that must be seen to make a slice valid for analysis.
+     *
+     * Reasoning about ratios may be premature if the sample size is overly small; this value is used
+     * to extend the scope of a slice until at least this many good or bad pulses are observed.
+     */
+    public final int minSliceCount;
+
     private final AtomicLong pulseCount = new AtomicLong(0);
-    private final AtomicLong timeAtLastTransition = new AtomicLong(0);
-    private final AtomicLong consecutiveBadResets = new AtomicLong(0);
+    private final AtomicLong timeAtLastTransition = new AtomicLong(System.currentTimeMillis());
+    private final AtomicInteger consecutiveBadResets = new AtomicInteger(0);
     private static final long GOOD_MASK = 0x7FFFFFFFL;
     private static final long BAD_MASK = 0x7FFFFFFF00000000L;
 
@@ -64,70 +87,145 @@ public class TimedRatioPolicy extends TransitionPolicy {
      *
      * @param openAtGoodRatio  See {@link #openAtGoodRatio the member variable}.
      * @param closeAtGoodRatio  See {@link #closeAtGoodRatio the member variable}.
-     * @param failAfterNBadResets  If < 1, fail is disabled. See {@link #failAfterNBadResets the member variable}.
+     * @param minSliceCount  See {@link #minSliceCount the member variable}.
+     * @param evalEveryNMillis  See {@link #evalEveryNMillis the member variable}.
+     * @param resetAfterNMillis  See {@link #resetAfterNMillis the member variable}.
+     * @param failAfterNBadResets  See {@link #failAfterNBadResets the member variable}.
      */
-    public TimedRatioPolicy(double openAtGoodRatio, double closeAtGoodRatio, int failAfterNBadResets,
-                            int sliceAfterNMillis, int resetAfterNMillis) {
+    public TimedRatioPolicy(double openAtGoodRatio, double closeAtGoodRatio, int minSliceCount,
+                            int evalEveryNMillis, int resetAfterNMillis, int failAfterNBadResets) {
+        if (openAtGoodRatio < 0.0 || openAtGoodRatio > 1.0) {
+            throw new IllegalArgumentException("openAtGoodRatio must be >= 0.0 and <= 1.0");
+        }
+        if (closeAtGoodRatio < 0.0 || closeAtGoodRatio > 1.0) {
+            throw new IllegalArgumentException("closeAtGoodRatio must be >= 0.0 and <= 1.0");
+        }
+        if (minSliceCount < 1) {
+            throw new IllegalArgumentException("minSliceCount must be >= 1");
+        }
+        if (evalEveryNMillis < 1) {
+            throw new IllegalArgumentException("evalEveryNMillis must be >= 1");
+        }
+        if (resetAfterNMillis < 1) {
+            throw new IllegalArgumentException("resetAfterNMillis must be >= 1");
+        }
         this.openAtGoodRatio = (float)openAtGoodRatio;
         this.closeAtGoodRatio = (float)closeAtGoodRatio;
         this.failAfterNBadResets = failAfterNBadResets;
-        this.sliceAfterNMillis = sliceAfterNMillis;
+        this.evalEveryNMillis = evalEveryNMillis;
         this.resetAfterNMillis = resetAfterNMillis;
+        this.minSliceCount = minSliceCount;
         slicer = CircuitBreaker.scheduledExecutorService.scheduleAtFixedRate(new Slicer(this),
-                sliceAfterNMillis, sliceAfterNMillis, TimeUnit.MILLISECONDS);
+                evalEveryNMillis, evalEveryNMillis, TimeUnit.MILLISECONDS);
     }
 
+
+    private boolean transition(int oldSnapshot, int newState, long now) {
+        if (circuit.transition(oldSnapshot, newState)) {
+            timeAtLastTransition.set(now);
+            if (newState == CLOSED) {
+                consecutiveBadResets.set(0);
+            }
+            return true;
+        }
+        return false;
+    }
+
+    /**
+     * Runs on background thread. Never runs in more than one thread at the same time.
+     */
     private void finalizeSlice() {
-        System.out.println("slicing");
-        long n = pulseCount.getAndSet(0);
-        long good = n & GOOD_MASK;
-        long bad = (n & BAD_MASK) >> 32;
-        double ratio = good / (bad > 0 ? bad : 1);
-        while (true) {
+
+        try {
+            // Tabulate our stats.
+            long n = pulseCount.getAndSet(0);
+            long good = n & GOOD_MASK;
+            long bad = (n & BAD_MASK) >> 32;
+            long all = good + bad;
+            double ratio = (all > 0) ? good / (double) all : 0.0;
             long elapsed;
-            long now = System.currentTimeMillis();
-            int x = circuit.getStateSnapshot();
-            switch (x & STATE_MASK) {
-                case OPEN:
-                    elapsed = now - timeAtLastTransition.get();
-                    if (elapsed >= resetAfterNMillis) {
-                        if (circuit.transition(x, RESETTING)) {
-                            timeAtLastTransition.set(now);
-                            return;
+
+            // First, handle the case where we haven't observed enough pulses to evaluate anything.
+            if (all < minSliceCount) {
+                while (true) {
+                    // It may be the case that enough time has elapsed for us to move from OPEN to RESETTING,
+                    // despite the lack of pulses...
+                    int x = circuit.getStateSnapshot();
+                    if ((x & STATE_MASK) == OPEN) {
+                        long now = System.currentTimeMillis();
+                        elapsed = now - timeAtLastTransition.get();
+                        if (elapsed >= resetAfterNMillis) {
+                            if (!transition(x, RESETTING, now)) {
+                                continue;
+                            }
                         }
                     } else {
-                        return;
+                        // Put back the count that we swapped out, so we can add to it.
+                        pulseCount.addAndGet(n);
+                        //System.out.println("Not enough data yet; extending slice.");
                     }
-                    break;
-                case CLOSED:
-                    if (ratio < openAtGoodRatio) {
-                        if (circuit.transition(x, OPEN)) {
-                            timeAtLastTransition.set(now);
-                            return;
-                        }
-                    }
-                    break;
-                case RESETTING:
-                    elapsed = now - timeAtLastTransition.get();
-                    if (elapsed >= resetAfterNMillis) {
-                        if (ratio >= closeAtGoodRatio) {
-                            if (circuit.transition(x, CLOSED)) {
-                                return;
+                    return;
+                }
+            }
+
+            // Okay, we saw a reasonable number of pulses and can thus evaluate the health of the circuit.
+            int cbr = -1;
+            while (true) {
+                long now = System.currentTimeMillis();
+                elapsed = now - timeAtLastTransition.get();
+                int x = circuit.getStateSnapshot();
+                switch (x & STATE_MASK) {
+                    case OPEN:
+                        if (elapsed >= resetAfterNMillis) {
+                            if (!transition(x, RESETTING, now)) {
+                                //System.out.println("Have to retry transition to RESETTING.");
+                                continue;
                             }
-                        } else {
-                            if (failAfterNBadResets > 0 && consecutiveBadResets.incrementAndGet() >= failAfterNBadResets) {
-                                if (circuit.transition(x, FAILED)) {
+                        }
+                        return;
+                    case CLOSED:
+                        if (ratio < openAtGoodRatio) {
+                            if (!transition(x, OPEN, now)) {
+                                //System.out.println("Have to retry transition to OPEN.");
+                                continue;
+                            }
+                        }
+                        return;
+                    case RESETTING:
+                        // Do things look good enough to close the circuit?
+                        if (ratio >= closeAtGoodRatio) {
+                            if (transition(x, CLOSED, now)) {
+                                return;
+                            } else {
+                                //System.out.println("Have to retry transition to CLOSED.");
+                                continue;
+                            }
+                        }
+                        // We didn't close the circuit. Should we should fail it instead?
+                        if (failAfterNBadResets > 0) {
+                            if (cbr == -1) {
+                                cbr = consecutiveBadResets.incrementAndGet();
+                            }
+                            if (cbr >= failAfterNBadResets) {
+                                if (transition(x, FAILED, now)) {
                                     return;
+                                } else {
+                                    //System.out.println("Have to retry transition to FAILED.");
+                                    continue;
                                 }
                             }
                         }
-                    } else {
+                        // We need to re-open the circuit.
+                        if (!transition(x, OPEN, now)) {
+                            continue;
+                        }
                         return;
-                    }
-                    break;
-                default:
-                    break;
+                    default:
+                        break;
+                }
             }
+        } catch (Throwable e) {
+            e.printStackTrace();
         }
     }
 
@@ -148,19 +246,62 @@ public class TimedRatioPolicy extends TransitionPolicy {
     }
 
     public void onBadPulse(Throwable e) {
-        // Loop until we can update our atomic without interference.
-        while (true) {
-            long n = pulseCount.get();
-            // Increment just the highest 32 bits of the number. (We are storing 2 signed 32-bit numbers in the
-            // same 64-bit number. The good count is in the bottom half, and the bad count is in the top half.)
-            long m = (n & GOOD_MASK) | ((((n >> 32) + 1) & GOOD_MASK) << 32);
-            if (pulseCount.compareAndSet(n, m)) {
-                return;
-            }
-        }
+        pulseCount.addAndGet(1L << 32);
     }
 
     public void onAltPulse() {
+        // do nothing
     }
 
+    public static Builder builder() {
+        return new Builder();
+    }
+
+    /*
+    private static long startTimeMillis = System.currentTimeMillis();
+    public static String getTimestamp() {
+        return String.format("%.3f", ((System.currentTimeMillis() - startTimeMillis) % 10000) / 1000.0);
+    }
+    */
+
+    /**
+     * A convenience class to make constructor parameters less opaque.
+     */
+    public static class Builder {
+        private double openAtGoodRatio = 0.5;
+        private double closeAtGoodRatio = 0.75;
+        private int minSliceCount = 10;
+        private int evalEveryNMillis = 100;
+        private int resetAfterNMillis = 99;
+        private int failAfterNBadResets = 0;
+
+        public Builder setOpenAtGoodRatio(double value) {
+            openAtGoodRatio = value;
+            return this;
+        }
+        public Builder setCloseAtGoodRatio(double value) {
+            closeAtGoodRatio = value;
+            return this;
+        }
+        public Builder setMinSliceCount(int value) {
+            minSliceCount = value;
+            return this;
+        }
+        public Builder setEvalEveryNMillis(int value) {
+            evalEveryNMillis = value;
+            return this;
+        }
+        public Builder setResetAfterNMillis(int value) {
+            resetAfterNMillis = value;
+            return this;
+        }
+        public Builder setFailAfterNBadResets(int value) {
+            failAfterNBadResets = value;
+            return this;
+        }
+        public TimedRatioPolicy build() {
+            return new TimedRatioPolicy(openAtGoodRatio, closeAtGoodRatio, minSliceCount,
+                    evalEveryNMillis, resetAfterNMillis, failAfterNBadResets);
+        }
+    }
 }

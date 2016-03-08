@@ -11,6 +11,7 @@ import static org.junit.Assert.fail;
 public class CapturingListener implements Circuit.Listener {
     public boolean debug = false;
     public final List<Integer> transitions = new ArrayList<Integer>();
+
     @Override
     public void onCircuitTransition(Circuit circuit, int oldState, int newState) {
         synchronized (transitions) {
@@ -19,10 +20,28 @@ public class CapturingListener implements Circuit.Listener {
             }
             transitions.add(newState);
             if (debug) {
-                System.out.printf("%d --> %d\n", oldState, newState);
+                System.out.printf("%s: %d --> %d\n", getTimestamp(), oldState, newState);
             }
         }
     }
+
+    private static long startTimeMillis = System.currentTimeMillis();
+    public static String getTimestamp() {
+        return String.format("%.3f", ((System.currentTimeMillis() - startTimeMillis) % 10000) / 1000.0);
+    }
+
+    public int[] getTransitionCounts() {
+        int counts[] = new int[4];
+        for (Integer n: transitions) {
+            counts[n]+= 1;
+        }
+        return counts;
+    }
+
+    public int getFinalState() {
+        return transitions.get(transitions.size() - 1);
+    }
+
     /**
      * Asserts that we captured the states we expected. On failure, dumps out a comparison so finding
      * the discrepancy is easy.

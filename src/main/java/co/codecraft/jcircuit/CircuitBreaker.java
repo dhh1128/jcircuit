@@ -105,7 +105,7 @@ public class CircuitBreaker {
      * It is important that tasks run by this service complete quickly (microseconds), to avoid
      * bogging down notifications needed by other parts of the system.
      */
-    public static final ScheduledExecutorService scheduledExecutorService = Executors.newSingleThreadScheduledExecutor();
+    public static final ScheduledExecutorService scheduledExecutorService = Executors.newScheduledThreadPool(1);
 
     /**
      * Receive notifications when the state of the circuit breaker changes.
