@@ -6,7 +6,20 @@
   <packaging>jar</packaging>
   <version>1.0-SNAPSHOT</version>
   <name>jcircuit</name>
+  <description>A pure java implementation of the circuit breaker design pattern.</description>
   <url>http://maven.apache.org</url>
+  <developers>
+    <developer>
+      <name>Daniel Hardman</name>
+      <email>daniel.hardman@gmail.com</email>
+      <organization>Codecraft</organization>
+      <organizationUrl>http://codecraft.co</organizationUrl>
+    </developer>
+  </developers>
+  <scm>
+    <connection>scm:git:https://github.com/dhh1128/jcircuit.git</connection>
+    <url>https://github.com/dhh1128/jcircuit.git</url>
+  </scm>
   <distributionManagement>
     <snapshotRepository>
       <id>ossrh</id>
