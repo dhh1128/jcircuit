@@ -4,7 +4,7 @@
   <groupId>co.codecraft</groupId>
   <artifactId>jcircuit</artifactId>
   <packaging>jar</packaging>
-  <version>1.0-SNAPSHOT</version>
+  <version>1.0</version>
   <name>jcircuit</name>
   <description>A pure java implementation of the circuit breaker design pattern.</description>
   <url>http://maven.apache.org</url>
@@ -16,6 +16,13 @@
       <organizationUrl>http://codecraft.co</organizationUrl>
     </developer>
   </developers>
+  <licenses>
+    <license>
+      <name>MIT License</name>
+      <url>http://www.opensource.org/licenses/mit-license.php</url>
+      <distribution>repo</distribution>
+    </license>
+  </licenses>
   <scm>
     <connection>scm:git:https://github.com/dhh1128/jcircuit.git</connection>
     <url>https://github.com/dhh1128/jcircuit.git</url>
