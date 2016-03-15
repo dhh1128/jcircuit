@@ -40,7 +40,8 @@
       </nav>
       <section>
         <h3>
-<a id="error-handling" class="anchor" href="#error-handling" aria-hidden="true"><span aria-hidden="true" class="octicon octicon-link"></span></a>Graceful, Robust Error Handling</h3>
+<a id="error-handling" class="anchor" href="#error-handling" aria-hidden="true">
+<span aria-hidden="true" class="octicon octicon-link"></span></a>Graceful, Robust Error Handling</h3>
 
 <p>
     Error handling is a complex topic. It's all well and good to throw exceptions, or to return EACCES, or to
@@ -64,16 +65,21 @@ More reading about circuit breakers and error handling:
     <a href="http://codecraft.co/2014/01/15/add-some-more-extra-redundancy-again/">"Add some more extra redundancy again"</a>
 </p>
 <h3>
-<a id="about-package" class="anchor" href="#about-package" aria-hidden="true"><span aria-hidden="true" class="octicon octicon-link"></span></a>About This Package</h3>
+<a id="about-package" class="anchor" href="#about-package" aria-hidden="true">
+<span aria-hidden="true" class="octicon octicon-link"></span></a>About This Package</h3>
 
 <p>
     The jcircuit library is a tidy little package that implements the circuit breaker design pattern (as articulated
     by Michael Nygard in <em>Release It!</em>) with no external dependencies. It is compatible with java 6+. It is well
-    tested, reasonably documented, and efficient even under very demanding concurrency. Plus it's free (<a href="https://github.com/dhh1128/jcircuit/blob/master/LICENSE">MIT license</a>).
+    tested, reasonably documented, and efficient even under very demanding concurrency. Plus it's free
+    (<a href="https://github.com/dhh1128/jcircuit/blob/master/LICENSE">MIT license</a>).
     Please put it to work to make software better for all of us.
 </p>
+<h3>
+  <a id="getting-started" class="anchor" href="#about-package" aria-hidden="true">
+  <span aria-hidden="true" class="octicon octicon-link"></span></a>Getting Started</h3>
 <p>
-    To use jcircuit in a maven, add this block to the <code>&lt;dependencies&gt;</code> section of your pom.xml:
+    1. Add this block to the <code>&lt;dependencies&gt;</code> section of your pom.xml:
 </p>
 
 <pre>
@@ -84,8 +90,46 @@ More reading about circuit breakers and error handling:
 &lt;/dependency&gt;
 </pre>
 
+<p>
+    2. Create a <a href="apidocs/co/codecraft/jcircuit/CircuitBreaker.html">CircuitBreaker</a> to manage a codepath
+    that needs to degrade gracefully:
+</p>
+<pre>
+<span style="color:#8080c0">private static</span> <a href="apidocs/co/codecraft/jcircuit/CircuitBreaker.html">CircuitBreaker</a> savePayloadBreaker =
+    <span style="color:#8080c0">new</span> CircuitBreaker(
+        <span style="color:#8080c0">new</span> <a href="apidocs/co/codecraft/jcircuit/TimedRatioPolicy.html">TimedRatioPolicy</a>().builder()
+          .<a href="apidocs/co/codecraft/jcircuit/TimedRatioPolicy.html#evalEveryNMillis">setEvalEveryNMillis</a>(1000)  <span style="color:#80c080">// check health 1x/sec</span>
+          .<a href="apidocs/co/codecraft/jcircuit/TimedRatioPolicy.html#openAtGoodRatio">setOpenAtGoodRatio</a>(0.5)    <span style="color:#80c080">// if ok &lt; 50% of time, trip</span>
+          .<a href="apidocs/co/codecraft/jcircuit/TimedRatioPolicy.html#closeAtGoodRatio">setCloseAtGoodRatio</a>(0.7)   <span style="color:#80c080">// close again if &gt;= 70% ok</span>
+          .<a href="apidocs/co/codecraft/jcircuit/TimedRatioPolicy.html#resetAfterNMillis">setResetAfterNMillis</a>(5000) <span style="color:#80c080">// try to reset after 5 secs</span>
+          .build());
+</pre>
+
+<p>
+    3. Put the circuit breaker to work:
+</p>
+
+<pre>
+<span style="color:#8080c0">public void</span> savePayload(Payload p) {
+    <span style="color:#80c080">// Let circuit breaker influence code path.
+    // Tell it about outcome so it can update its state.</span>
+    <span style="color:#8080c0">if</span> (savePayloadBreaker.<a href="apidocs/co/codecraft/jcircuit/CircuitBreaker.html#shouldTryNormalPath--">shouldTryNormalPath</a>()) {
+        <span style="color:#8080c0">try</span> {
+            server.save(p); <span style="color:#80c080">// we think we're healthy</span>
+            savePayloadBreaker.<a href="apidocs/co/codecraft/jcircuit/CircuitBreaker.html#onGoodPulse--">onGoodPulse</a>(); <span style="color:#80c080">// yep!</span>
+        } <span style="color:#8080c0">catch</span> (ServerBusyException e) {
+            savePayloadBreaker.<a href="apidocs/co/codecraft/jcircuit/CircuitBreaker.html#onBadPulse-java.lang.Throwable-">onBadPulse</a>(e); <span style="color:#80c080">// warning sign</span>
+        }
+    } <span style="color:#8080c0">else</span> {
+        savePayloadToTempFolder(p); <span style="color:#80c080">// fallback logic</span>
+        savePayloadBreaker.<a href="apidocs/co/codecraft/jcircuit/CircuitBreaker.html#onAltPulse--">onAltPulse</a>();
+    }
+}
+</pre>
+
 <h3>
-<a id="api-docs" class="anchor" href="#api-docs" aria-hidden="true"><span aria-hidden="true" class="octicon octicon-link"></span></a>API Docs</h3>
+<a id="api-docs" class="anchor" href="#api-docs" aria-hidden="true">
+<span aria-hidden="true" class="octicon octicon-link"></span></a>API Docs</h3>
 
 <p>
     An overview of key concepts, plus sample usage and descriptions of each class and method, can be found in the
@@ -93,7 +137,8 @@ More reading about circuit breakers and error handling:
 </p>
 
 <h3>
-  <a id="contribute" class="anchor" href="#contribute" aria-hidden="true"><span aria-hidden="true" class="octicon octicon-link"></span></a>Contribute</h3>
+  <a id="contribute" class="anchor" href="#contribute" aria-hidden="true">
+  <span aria-hidden="true" class="octicon octicon-link"></span></a>Contribute</h3>
 <p>
     Many of the <a href="apidocs/co/codecraft/jcircuit/TransitionPolicy.html">policy classes</a> written to
     govern circuit breakers are going to be special purpose. However, we are interested
