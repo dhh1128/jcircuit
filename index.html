@@ -97,7 +97,7 @@ More reading about circuit breakers and error handling:
 <pre>
 <span style="color:#8080c0">private static</span> <a href="apidocs/co/codecraft/jcircuit/CircuitBreaker.html">CircuitBreaker</a> savePayloadBreaker =
     <span style="color:#8080c0">new</span> CircuitBreaker(
-        <span style="color:#8080c0">new</span> <a href="apidocs/co/codecraft/jcircuit/TimedRatioPolicy.html">TimedRatioPolicy</a>().builder()
+        <a href="apidocs/co/codecraft/jcircuit/TimedRatioPolicy.html">TimedRatioPolicy</a>.builder()
           .<a href="apidocs/co/codecraft/jcircuit/TimedRatioPolicy.html#evalEveryNMillis">setEvalEveryNMillis</a>(1000)  <span style="color:#80c080">// check health 1x/sec</span>
           .<a href="apidocs/co/codecraft/jcircuit/TimedRatioPolicy.html#openAtGoodRatio">setOpenAtGoodRatio</a>(0.5)    <span style="color:#80c080">// if ok &lt; 50% of time, trip</span>
           .<a href="apidocs/co/codecraft/jcircuit/TimedRatioPolicy.html#closeAtGoodRatio">setCloseAtGoodRatio</a>(0.7)   <span style="color:#80c080">// close again if &gt;= 70% ok</span>
