@@ -7,14 +7,15 @@ import java.util.List;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
+
+import static co.codecraft.jcircuit.Circuit.*;
 
 
 public class TimedRatioPolicyTest {
 
     @Test
-    public void test_permanent_failure() throws InterruptedException {
+    public void permanent_failure_is_sticky() throws InterruptedException {
         CapturingListener listener = new CapturingListener();
         //listener.debug = true;
         TimedRatioPolicy policy = TimedRatioPolicy.builder()
@@ -27,21 +28,69 @@ public class TimedRatioPolicyTest {
         /*
         For a brief time, report good health. Then report bad health for a long time, such that the
         circuit breaker tries to reset several times and eventually fails. Then simulate good health
-        again. We should get stuck in the FAILED state.
+        again. We should remain stuck in the FAILED state.
         */
         toggleSimulatedHealth(cb, 90, 780, 300);
 
         assertTrue(listener.transitions.size() < 20);
-        assertEquals(Circuit.FAILED, listener.getFinalState());
+        assertEquals(FAILED, listener.getFinalState());
         int counts[] = listener.getTransitionCounts();
-        assertTrue(counts[Circuit.OPEN] >= 2);
-        assertEquals(1, counts[Circuit.CLOSED]);
-        assertTrue(counts[Circuit.RESETTING] >= 2);
-        assertEquals(1, counts[Circuit.FAILED]);
+        assertTrue(counts[OPEN] >= 2);
+        assertEquals(1, counts[CLOSED]);
+        assertTrue(counts[RESETTING] >= 2);
+        assertEquals(1, counts[FAILED]);
     }
 
     @Test
-    public void test_complete_cycle() throws InterruptedException {
+    public void manual_reset_clears_consecutive_failures() throws InterruptedException {
+        CapturingListener listener = new CapturingListener();
+        listener.debug = true;
+        TimedRatioPolicy policy = TimedRatioPolicy.builder()
+                .setEvalEveryNMillis(50)
+                .setResetAfterNMillis(49)
+                .setFailAfterNBadResets(3)
+                .build();
+        final CircuitBreaker cb = new CircuitBreaker(policy, listener);
+
+        /*
+        For a brief time, report good health. Then report bad health for a long time, such that the
+        circuit breaker tries to reset several times and eventually fails. Then simulate good health
+        again. We would remain stuck in the FAILED state, except that on another thread, we're going
+        to directly transition back to CLOSED. When that transition happens, and then we fail
+        again, we should NO go to FAILED, because the number of consecutive failed resets should be
+        1, not max+1.
+        */
+        Thread manualCloser = new Thread(new Runnable() {
+            @Override
+            public void run() {
+                try {
+                    Thread.sleep(505);
+                    cb.directTransition(CLOSED, true);
+                } catch (InterruptedException e) {
+                    e.printStackTrace();
+                }
+            }
+        });
+        manualCloser.setDaemon(true);
+        manualCloser.start();
+        toggleSimulatedHealth(cb,
+                95,  // health goes bad near the end of 2nd eval cycle
+                605, // stay bad for a number of eval cycles; we should be open by 150 ms, reset at 200, open again at
+                     // 250 ms, reset again at 300, fail at 350 ms. Thereafter, we should be stuck in the failed state
+                     // until a manual reset happens at 505 ms. At 550 ms, we should fail into OPEN, because we're
+                     // still unhealthy. Then, at 600 ms, we should reset, and at 650 we should fail again--into OPEN,
+                     // NOT into FAILED--because the directTransition() call at 505 ms should have reset consec reset
+                     // failures to zero. At 700 ms, we should start reset again, and at 750, we should finally
+                     // succeed.
+                200 // allow 200 ms to run in the green.
+        );
+
+        listener.assertStates(CLOSED, OPEN, RESETTING, OPEN, RESETTING, OPEN, RESETTING, FAILED, CLOSED,
+                OPEN, RESETTING, OPEN, RESETTING, CLOSED);
+    }
+
+    @Test
+    public void complete_cycle() throws InterruptedException {
         CapturingListener listener = new CapturingListener();
         //listener.debug = true;
 

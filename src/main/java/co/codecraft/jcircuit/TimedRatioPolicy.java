@@ -8,10 +8,13 @@ import java.util.concurrent.atomic.AtomicLong;
 import static co.codecraft.jcircuit.Circuit.*;
 
 /**
- * Provides a simple transition policy, where all rules are expressed in terms of
- * ratios of good and bad pulses.
+ * <p>Provides a simple transition policy where all rules are expressed in terms of
+ * ratios of good and bad pulses. This policy is suitable for implementing transition rules such as:
+ * "Open a circuit if we see <em style="color:red">X</em>% failures in a given time slice of
+ * <em style="color:red">Y</em> milliseconds. Reset after <em style="color:red">Z</em> milliseconds
+ * to try again."</p>
  *
- * In terms of efficiency, this transitionPolicy is suitable for highly concurrent environments and
+ * <p>In terms of efficiency, this policy is suitable for highly concurrent environments and
  * very fast pulses (hundreds or thousands of pulses per second). Its overhead is low, and
  * it is robust and well tested. However, it is important to match the transition thresholds
  * in the constructor to the concurrency you expect. An env where dozens or hundreds of
@@ -21,19 +24,19 @@ import static co.codecraft.jcircuit.Circuit.*;
  * moderately different from the order in which they actually occur. In practical terms,
  * that means you shouldn't use low thresholds (e.g., open the circuit after 5 bad pulses in
  * a row, and sucessfully reset after 5 good ones) where concurrency and pulse rate are
- * high.
+ * high.</p>
  */
 public class TimedRatioPolicy extends TransitionPolicy {
 
     /**
-     * Open a closed circuit breaker if we see a ratio of good:all that is <= this value.
+     * Open a closed circuit breaker if we see a ratio of good:all that is &lt;= this value.
      * A value between 0.0 and 1.0, inclusive.
      */
     public final float openAtGoodRatio;
 
     /**
      * Deem an open circuit breaker "repaired" and close it if, while resetting, we see a ratio of
-     * good:all pulses >= this value. A value between 0.0 and 1.0, inclusive. Generally, this value
+     * good:all pulses &gt;= this value. A value between 0.0 and 1.0, inclusive. Generally, this value
      * will be greater than {@link #openAtGoodRatio}, so a reset doesn't succeed unless the circuit
      * is likely to stay closed.
      */
@@ -41,7 +44,7 @@ public class TimedRatioPolicy extends TransitionPolicy {
 
     /**
      * Fail a circuit breaker after attempting to reset (and failing), this many times in a row. If
-     * this value is <= 0, the circuit breaker never fails -- it just transitions from {@link Circuit#RESETTING}
+     * this value is &lt;= 0, the circuit breaker never fails -- it just transitions from {@link Circuit#RESETTING}
      * to either {@link Circuit#CLOSED} or {@link Circuit#OPEN}.
      */
     public final int failAfterNBadResets;
@@ -61,8 +64,16 @@ public class TimedRatioPolicy extends TransitionPolicy {
     public final int evalEveryNMillis;
 
     /**
-     * Determines when we are ready to attempt a reset, after having an open circuit for a while. This should
-     * be a value >= @{link #evalEveryNMillis}, since resets are only attempted on eval boundaries.
+     * <p>Determines when we are ready to attempt a reset, after having an open circuit for a while.</p>
+     *
+     * <p>Resets are only attempted on eval boundaries, since a full eval cycle must complete to generate enough
+     * numbers to evaluate ratios with confidence. Maturity for a reset attempt is tested by pure elapsed time
+     * at the end of each eval cycle. Therefore, it is recommended that this number be chosen using the
+     * formula <code>(evalEveryNMillis * multiplier) - 1</code>. This is because testing reveals that sometimes
+     * periodic evaluation is early by a few microseconds. In a case where, for example, <code>evalEveryNMillis</code>
+     * is 100, if <code> resetAfterNMillis</code> were also set to 100, the first eval cycle would execute, compare
+     * elapsed time to 100 millis, and conclude that (very) slightly less than 100 millis had elapsed, so we would not
+     * be mature for a reset attempt.</p>
      */
     public final int resetAfterNMillis;
 
@@ -122,6 +133,7 @@ public class TimedRatioPolicy extends TransitionPolicy {
 
     private boolean transition(int oldSnapshot, int newState, long now) {
         if (circuit.transition(oldSnapshot, newState)) {
+            System.out.printf("consectiveBadResets = %d\n", consecutiveBadResets.get());
             timeAtLastTransition.set(now);
             if (newState == CLOSED) {
                 consecutiveBadResets.set(0);
@@ -192,6 +204,7 @@ public class TimedRatioPolicy extends TransitionPolicy {
                         }
                         return;
                     case RESETTING:
+                        System.out.printf("Handling resetting; failAfter = %d; ratio = %f\n", failAfterNBadResets, ratio);
                         // Do things look good enough to close the circuit?
                         if (ratio >= closeAtGoodRatio) {
                             if (transition(x, CLOSED, now)) {
@@ -206,6 +219,7 @@ public class TimedRatioPolicy extends TransitionPolicy {
                             if (cbr == -1) {
                                 cbr = consecutiveBadResets.incrementAndGet();
                             }
+                            System.out.printf("Checking for failure; cbr = %d\n", cbr);
                             if (cbr >= failAfterNBadResets) {
                                 if (transition(x, FAILED, now)) {
                                     return;
@@ -229,7 +243,7 @@ public class TimedRatioPolicy extends TransitionPolicy {
         }
     }
 
-    public static class Slicer implements Runnable {
+    private static class Slicer implements Runnable {
         private TimedRatioPolicy policy;
         public Slicer(TimedRatioPolicy policy) {
             this.policy = policy;
@@ -302,6 +316,14 @@ public class TimedRatioPolicy extends TransitionPolicy {
         public TimedRatioPolicy build() {
             return new TimedRatioPolicy(openAtGoodRatio, closeAtGoodRatio, minSliceCount,
                     evalEveryNMillis, resetAfterNMillis, failAfterNBadResets);
+        }
+    }
+
+    @Override
+    public void afterDirectTransition(int desiredState, boolean force) {
+        timeAtLastTransition.set(System.currentTimeMillis());
+        if (desiredState == CLOSED) {
+            consecutiveBadResets.set(0);
         }
     }
 }

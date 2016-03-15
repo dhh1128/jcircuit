@@ -4,7 +4,6 @@ import org.junit.Test;
 
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Random;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.Assert.*;
@@ -12,20 +11,20 @@ import static org.junit.Assert.*;
 public class CircuitTest {
 
     @Test
-    public void nullListenerIsFine() {
+    public void null_listener_is_fine() {
         Circuit c = new Circuit(null);
         assertTrue(c.transition(c.getStateSnapshot(), Circuit.OPEN));
     }
 
     @Test
-    public void redundantTransitionReturnsTrue() {
+    public void redundant_transition_returns_true() {
         Circuit c = new Circuit(null);
         c.transition(c.getStateSnapshot(), Circuit.OPEN);
         assertTrue(c.transition(c.getStateSnapshot(), Circuit.OPEN));
     }
 
     @Test
-    public void redundantTransitionDoesntCallListener() {
+    public void redundant_transition_doesnt_call_listener() {
         CapturingListener cl = new CapturingListener();
         Circuit c = new Circuit(cl);
         c.transition(c.getStateSnapshot(), Circuit.CLOSED);
@@ -33,7 +32,7 @@ public class CircuitTest {
     }
 
     @Test
-    public void listenerIsCalledForEveryTransition() {
+    public void listener_is_called_for_every_transition() {
         CapturingListener cl = new CapturingListener();
         Circuit c = new Circuit(cl);
         c.transition(c.getStateSnapshot(), Circuit.OPEN);
@@ -45,7 +44,21 @@ public class CircuitTest {
     }
 
     @Test
-    public void threadSafety() {
+    public void state_constants_are_ordered_correctly() {
+        assertTrue(Circuit.CLOSED < Circuit.OPEN);
+        assertTrue(Circuit.OPEN < Circuit.RESETTING);
+        assertTrue(Circuit.RESETTING < Circuit.FAILED);
+    }
+
+    @Test
+    public void state_constant_string_conversions_work() {
+        for (int i = Circuit.CLOSED; i <= Circuit.FAILED; ++i) {
+            assertEquals(i, Circuit.stringToState(Circuit.stateToString(i)));
+        }
+    }
+
+    @Test
+    public void thread_safety() {
         final CapturingListener cl = new CapturingListener();
         final Circuit c = new Circuit(cl);
         //c.shouldValidate = true;
@@ -53,8 +66,8 @@ public class CircuitTest {
         List<Thread> threads = new ArrayList<Thread>();
         // Create 5 well-behaved threads that will each contend to transition the state machine in valid
         // ways. Because there is contention and non-deterministic concurrency, we ought to have a fair
-        // number of cases where transition() fails. However, if our thread safety is correct, we should
-        // observe only valid transitions in the capture of what ended up happening.
+        // number of cases where transition() rejects a proposed change. However, if our thread safety
+        // is correct, we should observe only valid transitions in the capture of what ended up happening.
         for (int i = 0; i < 5; ++i) {
             Thread th = new Thread(new Runnable() {
                 @Override
@@ -101,7 +114,7 @@ public class CircuitTest {
         }
         //System.out.printf("validCount = %d\n", validCount.get());
         assertTrue(validCount.get() > 1500);
-        assertTrue(validCount.get() < 5000);
+        assertTrue(validCount.get() <= 5000);
         for (int i = 0, j = 1; j < cl.transitions.size(); ++i, ++j) {
             int oldState = cl.transitions.get(i);
             int newState = cl.transitions.get(j);

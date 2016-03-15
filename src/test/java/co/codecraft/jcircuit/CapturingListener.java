@@ -2,6 +2,7 @@ package co.codecraft.jcircuit;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicLong;
 
 import static org.junit.Assert.fail;
 
@@ -20,7 +21,8 @@ public class CapturingListener implements Circuit.Listener {
             }
             transitions.add(newState);
             if (debug) {
-                System.out.printf("%s: %d --> %d\n", getTimestamp(), oldState, newState);
+                System.out.printf("%s: %d (%s) --> %d (%s)\n", getTimestamp(), oldState,
+                        Circuit.stateToString(oldState), newState, Circuit.stateToString(newState));
             }
         }
     }
@@ -45,7 +47,7 @@ public class CapturingListener implements Circuit.Listener {
     /**
      * Asserts that we captured the states we expected. On failure, dumps out a comparison so finding
      * the discrepancy is easy.
-     * @param expected
+     * @param expected A variadic list of states, typically beginning with {@link Circuit#CLOSED}.
      */
     public void assertStates(int... expected) {
         List<Integer> actual = transitions;
