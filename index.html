@@ -70,8 +70,10 @@ More reading about circuit breakers and error handling:
     The jcircuit library is a tidy little package that implements the circuit breaker design pattern (as articulated
     by Michael Nygard in <em>Release It!</em>) with no external dependencies. It is compatible with java 6+. It is well
     tested, reasonably documented, and efficient even under very demanding concurrency. Plus it's free (<a href="https://github.com/dhh1128/jcircuit/blob/master/LICENSE">MIT license</a>).
-    Please use it to make software better for all of us. To use the library in maven, add this block to the
-    <code>&lt;dependencies&gt;</code> section of your pom.xml:
+    Please put it to work to make software better for all of us.
+</p>
+<p>
+    To use jcircuit in a maven, add this block to the <code>&lt;dependencies&gt;</code> section of your pom.xml:
 </p>
 
 <pre>
@@ -83,11 +85,20 @@ More reading about circuit breakers and error handling:
 </pre>
 
 <h3>
-<a id="api-docs" class="anchor" href="#docs" aria-hidden="true"><span aria-hidden="true" class="octicon octicon-link"></span></a>API Docs</h3>
+<a id="api-docs" class="anchor" href="#api-docs" aria-hidden="true"><span aria-hidden="true" class="octicon octicon-link"></span></a>API Docs</h3>
 
 <p>
     An overview of key concepts, plus sample usage and descriptions of each class and method, can be found in the
     generated <a href="apidocs/index.html">javadoc</a> (or by reading <a href="https://github.com/dhh1128/jcircuit">the code</a>).
+</p>
+
+<h3>
+  <a id="contribute" class="anchor" href="#contribute" aria-hidden="true"><span aria-hidden="true" class="octicon octicon-link"></span></a>Contribute</h3>
+<p>
+    Many of the <a href="apidocs/co/codecraft/jcircuit/TransitionPolicy.html">policy classes</a> written to
+    govern circuit breakers are going to be special purpose. However, we are interested
+    in adding general-purpose ones to the jcircuit package. If you create one (or if you improve tests or fix a bug),
+    please open a pull request so your brilliance and elbow grease can be shared with everyone.
 </p>
 
       </section>
