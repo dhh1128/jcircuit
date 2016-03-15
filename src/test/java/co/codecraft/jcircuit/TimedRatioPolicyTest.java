@@ -44,7 +44,7 @@ public class TimedRatioPolicyTest {
     @Test
     public void manual_reset_clears_consecutive_failures() throws InterruptedException {
         CapturingListener listener = new CapturingListener();
-        listener.debug = true;
+        //listener.debug = true;
         TimedRatioPolicy policy = TimedRatioPolicy.builder()
                 .setEvalEveryNMillis(50)
                 .setResetAfterNMillis(49)

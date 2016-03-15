@@ -9,7 +9,8 @@ import static co.codecraft.jcircuit.Circuit.*;
 
 /**
  * <p>Provides a simple transition policy where all rules are expressed in terms of
- * ratios of good and bad pulses. This policy is suitable for implementing transition rules such as:
+ * ratios of good and bad pulses, calculated at regularly timed intervals. This policy is suitable
+ * for implementing transition rules such as:
  * "Open a circuit if we see <em style="color:red">X</em>% failures in a given time slice of
  * <em style="color:red">Y</em> milliseconds. Reset after <em style="color:red">Z</em> milliseconds
  * to try again."</p>
@@ -133,7 +134,6 @@ public class TimedRatioPolicy extends TransitionPolicy {
 
     private boolean transition(int oldSnapshot, int newState, long now) {
         if (circuit.transition(oldSnapshot, newState)) {
-            System.out.printf("consectiveBadResets = %d\n", consecutiveBadResets.get());
             timeAtLastTransition.set(now);
             if (newState == CLOSED) {
                 consecutiveBadResets.set(0);
@@ -204,7 +204,6 @@ public class TimedRatioPolicy extends TransitionPolicy {
                         }
                         return;
                     case RESETTING:
-                        System.out.printf("Handling resetting; failAfter = %d; ratio = %f\n", failAfterNBadResets, ratio);
                         // Do things look good enough to close the circuit?
                         if (ratio >= closeAtGoodRatio) {
                             if (transition(x, CLOSED, now)) {
@@ -219,7 +218,6 @@ public class TimedRatioPolicy extends TransitionPolicy {
                             if (cbr == -1) {
                                 cbr = consecutiveBadResets.incrementAndGet();
                             }
-                            System.out.printf("Checking for failure; cbr = %d\n", cbr);
                             if (cbr >= failAfterNBadResets) {
                                 if (transition(x, FAILED, now)) {
                                     return;

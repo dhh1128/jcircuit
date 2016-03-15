@@ -17,21 +17,21 @@ import static co.codecraft.jcircuit.Circuit.*;
  *
  * <h3>Key Concepts</h3>
  *
- * <p>Circuit breakers protect a fallible unit of work (a chunk of code) that will be called repeatedly. This
- * is called a {@link Circuit "circuit"}. A circuit <em>breaker</em> encapsulates the management wrapping
- * its circuit.</p>
+ * <p>Circuit breakers protect a fallible unit of work (a chunk of code or code path) that will be called repeatedly.
+ * This fallible unit of work is called a <strong>{@link Circuit}</strong>. A <strong><code>CircuitBreaker</code></strong>
+ * encapsulates management logic for the code it protects.</p>
  *
- * <p>Normal work is attempted whenever the circuit is {@link Circuit#CLOSED "closed"}. In order
+ * <p>Normal work is attempted whenever the circuit is <strong>{@link Circuit#CLOSED CLOSED}</strong>. In order
  * for the circuit breaker to be useful, there must be an alternate code path that is safer or less taxing,
- * and calling code must take this alternate path when the circuit is {@link Circuit#OPEN "open"}. The
+ * and calling code must take this alternate path when the circuit is <strong>{@link Circuit#OPEN OPEN}</strong>. The
  * obvious alternate/open code path is to do nothing, but more elaborate alternate logic is conceivable.</p>
  *
  * <p>A single test of the circuit breaker, followed by the execution of either the normal or the alternate
- * codepath, is called a "pulse."</p>
+ * codepath, is called a "<strong>pulse</strong>."</p>
  *
- * <p>A circuit breaker may be "reset", meaning that its circuit has been open, and we now want to close it again to
- * resume normal operations. {@link Circuit#RESETTING Resetting} can trigger automatically (e.g., after
- * a time delay or a number of pulses). If a circuit has {@link Circuit#FAILED failed}, resets
+ * <p>A circuit breaker may be "<strong>reset</strong>", meaning that its circuit has been open, and we now want to
+ * close it again to resume normal operations. The {@link Circuit#RESETTING RESETTING} state can trigger automatically (e.g., after
+ * a time delay or a number of pulses). If a circuit is <strong>{@link Circuit#FAILED FAILED}</strong>, resets
  * are only manual (via the {@link #directTransition(int, boolean) directTransition()} method). Whether automatic
  * or manual, resets do not necessarily succeed.</p>
  *
@@ -39,15 +39,16 @@ import static co.codecraft.jcircuit.Circuit.*;
  * when a class is loaded, rather than as instance variables. There may be a few use cases
  * that violate this assumption, and that may be fine--but that is not the sweet spot for their design.</p>
  *
- * <p>The <a href="Circuit.html#statemachine">state machines</a> of all circuits are identical, as are thevalid core
+ * <p>The <a href="Circuit.html#statemachine">state machines</a> of all circuits are identical, as are the core
  * behaviors of all circuit breakers. However, how circuit breakers decide to transition from one state to
  * another varies. Some circuit breakers might trip after certain numbers or types of errors; others might
  * look at a failure rate relative to other metrics, or the availability or scarcity of key resources,
  * or at a combination of the above. Also, the criteria for a successful reset may vary. For this reason,
- * each circuit breaker is associated with a separate {@link TransitionPolicy} object to define thresholds
+ * each circuit breaker is associated with a separate <strong>{@link TransitionPolicy}</strong> object to define thresholds
  * and retry logic. The policy, not the circuit breaker, embodies the main complexity involved in the
  * technique. As a consumer of this package, you will likely customize by writing a new TransitionPolicy.
- * Study the implementation of the samples, and their unit tests, to understand how.</p>
+ * Study the implementation of provided implementations such as {@link TimedRatioPolicy}, and their unit tests,
+ * to understand how.</p>
  *
  * <p>Because changes in circuit state may need to generate side effects beyond the scope of the
  * protected code, a {@link Listener} interface may be used to receive notifications.</p>
@@ -78,24 +79,24 @@ import static co.codecraft.jcircuit.Circuit.*;
  * <li>Write a block of code like this:</li>
  * </ol>
  *
- * <pre>
- *    // Always test state at the top of each pulse. Circuit breakers optimize this test intelligently,
+ * <pre style="padding-top:1em">
+ *    <span style="color:green">// Always test state at the top of each pulse. Circuit breakers optimize this test intelligently,
  *    // especially for the common case when the circuit is closed. Note that we are NOT asking whether
  *    // the state of the circuit breaker is CLOSED; we might want to try normal if we are RESETTING
- *    // as well...
- *    if (myCircuitBreaker.{@link #shouldTryNormalPath()}) {
- *        try {
+ *    // as well...</span>
+ *    <span style="color:blue">if</span> (myCircuitBreaker.{@link #shouldTryNormalPath()}) {
+ *        <span style="color:blue">try</span> {
  *            doNormalStuff();
- *            // Report good results so transitionPolicy can update as needed (e.g., to complete a reset).
+ *            <span style="color:green">// Report good results so policy can update as needed (e.g., to complete a reset).</span>
  *            myCircuitBreaker.{@link #onGoodPulse()};
- *        } catch (Throwable e) {
- *            // Report bad results so transitionPolicy can update as needed.
+ *        } <span style="color:blue">catch</span> (Throwable e) {
+ *            <span style="color:green">// Report bad results so policy can update as needed.</span>
  *            myCircuitBreaker.{@link #onBadPulse(Throwable) onBadPulse(e)};
  *        }
- *    } else {
- *        // optional; doing nothing may be what you want
+ *    } <span style="color:blue">else</span> {
+ *        <span style="color:green">// optional; doing nothing may be what you want</span>
  *        doSaferOrCheaperAlternateStuff();
- *        // Report alternate workflow so transitionPolicy can update as needed (e.g., to schedule a reset).
+ *        <span style="color:green">// Report alternate workflow so policy can update as needed (e.g., to schedule a reset).</span>
  *        myCircuitBreaker.onAltPulse();
  *    }
  * </pre>
@@ -110,8 +111,8 @@ public class CircuitBreaker {
     public final TransitionPolicy transitionPolicy;
 
     /**
-     * Provides a thread that can be used to monitor circuit breakers that do very light work
-     * on a schedule. This can be used by policies that need to check something periodically.
+     * Provides a thread that {@link TransitionPolicy} objects can use to monitor circuit breakers that do very light
+     * work on a schedule (e.g., to check something periodically).
      * It is important that tasks run by this service complete quickly (microseconds), to avoid
      * bogging down notifications needed by other parts of the system.
      */
@@ -133,7 +134,7 @@ public class CircuitBreaker {
     }
 
     /**
-     * Tell the circuit breaker that we just did a unit of work (a "pulse") that succeeded. This information
+     * Tell the circuit breaker that we just did a unit of work that succeeded. This information
      * may be used by the circuit breaker's {@link #transitionPolicy} to update state.
      */
     public void onGoodPulse() {
@@ -141,7 +142,7 @@ public class CircuitBreaker {
     }
 
     /**
-     * Tell the circuit breaker that we just did a unit of work (a "pulse") that failed. This information
+     * Tell the circuit breaker that we just did a unit of work that failed. This information
      * may be used by the circuit breaker's {@link #transitionPolicy} to update state.
      *
      * @param e  What went wrong. May be null if the exception is not available. Policy implementations
@@ -153,7 +154,7 @@ public class CircuitBreaker {
     }
 
     /**
-     * Tell the circuit breaker that we just did an alternate unit of work (a "pulse") because the circuit
+     * Tell the circuit breaker that we just did an alternate unit of work because the circuit
      * was open. This information may be used by the circuit breaker's {@link #transitionPolicy} to update state.
      */
     public void onAltPulse() {
@@ -161,10 +162,11 @@ public class CircuitBreaker {
     }
 
     /**
-     * Public users of the circuit breaker should call this method to decide whether to attempt normal or
-     * alternate/fallback work.
+     * Public users of the circuit breaker should call this method at the beginning of each pulse
+     * to decide whether to attempt normal or alternate/fallback work.
      *
-     * @return true if the caller should attempt normal work.
+     * @return true if the caller should attempt normal work. This will be the case if the circuit is
+     *     {@link Circuit#OPEN OPEN} or {@link Circuit#RESETTING RESETTING}.
      */
     public boolean shouldTryNormalPath() {
         int snapshot = circuit.getStateSnapshot();
@@ -179,30 +181,32 @@ public class CircuitBreaker {
 
     /**
      * <p>Directly transition the {@link Circuit} managed by this CircuitBreaker to a specific state,
-     * without waiting for a policy to trigger the transition. This can be used to do manual resets
-     * out of a {@link Circuit#FAILED FAILED} state (<code>desiredState</code> = {@link Circuit#RESETTING RESETTING}),
-     * or for more draconian manipulations.</p>
+     * without waiting for a policy to trigger the transition. This is not the normal way to control
+     * circuit breakers--usually a {@link TransitionPolicy} manages state automatically--but it can be used to do manual
+     * resets out of a {@link Circuit#FAILED FAILED} state (<code>desiredState</code> = {@link Circuit#RESETTING
+     * RESETTING}), or for more draconian manipulations.</p>
      *
      * <p>A manual {@link Circuit#FAILED FAILED} --&gt; {@link Circuit#RESETTING RESETTING} transition through
      * this method does not close the circuit; it simply begins the retesting of circuit health that will eventually
      * close or open it again. If you want to directly transition {@link Circuit#FAILED FAILED} all the way to
      * {@link Circuit#CLOSED CLOSED} (ignoring the policy's criteria for a successful reset), you have to make two
-     * calls ({@link Circuit#FAILED FAILED} --&gt; {@link Circuit#RESETTING RESETTING}, then Circuit#RESETTING
-     * RESETTING} --&gt; {@link Circuit#CLOSED CLOSED}. Since other code might alter state in between the two calls,
+     * calls ({@link Circuit#FAILED FAILED} --&gt; {@link Circuit#RESETTING RESETTING}, then {@link Circuit#RESETTING
+     * RESETTING} --&gt; {@link Circuit#CLOSED CLOSED}). Since other code might alter state in between the two calls,
      * there is no guarantee of this succeeding. You can use the <code>force</code> parameter if you need a
      * deterministic outcome.</p>
      *
      * <p>Besides the manual reset workflow, the other common use case for this method is in conjunction with a
      * {@link DirectTransitionPolicy}, where policy is essentially inert.</p>
      *
-     * @param force  If true, ignore <a href="Circuit.html#statemachine">state machines rules</a> and set the state
+     * @param desiredState  The state that should be active after the transition.
+     * @param force  If true, ignore <a href="Circuit.html#statemachine">state machine rules</a> and set the state
      *               regardless of what the circuit's current state is. A direct transition request can still be
      *               denied if <code>force = true</code>, but only because the active transition policy rejects it.
      *               This may happen if a certain policy's housekeeping cannot recover from external manipulation, for
      *               example--something that won't happen with this package's core policies but may happen with others.
      * @return true if the transition was valid, false if it was rejected because the policy disallowed it, or because
      *     <code>force</code> was <code>false</code> and the transition did not apply (e.g., we tried to close an
-     *     {@link Circuit#OPEN OPEN} circuit without {@link Circuit#RESETTING} first).
+     *     {@link Circuit#OPEN OPEN} circuit without {@link Circuit#RESETTING RESETTING} first).
      */
     public boolean directTransition(int desiredState, boolean force) {
         boolean ok = false;

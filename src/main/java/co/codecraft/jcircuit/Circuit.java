@@ -224,10 +224,10 @@ public class Circuit {
     public interface Listener {
         /**
          * @param circuit  The {@link Circuit} that has changed.
-         * @param oldState  The previous state. This will be one of the following constants: {@link #CLOSED},
-         *                  {@link #OPEN}, {@link #RESETTING}, or {@link #FAILED}.
-         * @param newState  The new state. This will be one of the following constants: {@link #CLOSED},
-         *                  {@link #OPEN}, {@link #RESETTING}, or {@link #FAILED}.
+         * @param oldState  The previous state. This will be one of the following constants: {@link #CLOSED CLOSED},
+         *                  {@link #OPEN OPEN}, {@link #RESETTING RESETTING}, or {@link #FAILED FAILED}.
+         * @param newState  The new state. This will be one of the following constants: {@link #CLOSED CLOSED},
+         *                  {@link #OPEN OPEN}, {@link #RESETTING RESETTING}, or {@link #FAILED FAILED}.
          */
         void onCircuitTransition(Circuit circuit, int oldState, int newState);
     }

@@ -11,10 +11,11 @@ import java.lang.ref.WeakReference;
  * <p>Methods of this class are called by the {@link CircuitBreaker} that owns the policy--public callers never
  * use them directly.</p>
  *
- * <p>Normally, each CircuitBreaker should have its own unique TransitionPolicy instance. This rule can be
- * broken in carefully pondered cases; however, remember that if a TransitionPolicy instance has to update shared
- * state used by more than one Circuit, it will likely need a mutex to do so safely. This creates a bottleneck that
- * could be very undesirable.
+ * <p>Each CircuitBreaker has its own unique TransitionPolicy instance; the two objects are bound together
+ * during the CircuitBreaker's constructor. If multiple instances of the same TransitionPolicy class need to
+ * share state, then the TransitionPolicy can be written to support that. However, remember that if a
+ * TransitionPolicy instance has to update shared state used by more than one Circuit, it will likely need a
+ * mutex to do so safely. This creates a potential bottleneck that could be problematic.
  * </p>
  */
 abstract public class TransitionPolicy {
